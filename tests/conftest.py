@@ -120,6 +120,9 @@ def client(tmp_path) -> TestClient:
     app = create_app(
         database_url=f"sqlite:///{(tmp_path / 'api.db').as_posix()}",
         artifact_root=tmp_path / "artifacts",
+        # 显式声明本地开发模式：身份模式是 fail-closed 的，缺省（或生产模式）会拒绝
+        # X-Dev-* 自报身份头。测试必须像真实本地环境一样显式开启。
+        identity_mode="dev",
     )
     with TestClient(app) as c:
         yield c

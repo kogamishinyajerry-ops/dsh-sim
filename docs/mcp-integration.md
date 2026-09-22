@@ -91,7 +91,8 @@ UNAVAILABLE。生效后工具名为 `mcp__dsh-sim__<tool>`。
 ## 6. 重启 dsh web 后的验证 checklist（给主会话/用户）
 
 1. 起工程服务：`.../Scripts/uvicorn.exe dsh_sim.api.main:app --port 8600`
-   （工作目录 `dsh-sim/`）。
+   （工作目录 `dsh-sim/`）。本地联调须显式声明开发模式，否则 MCP/面板的身份头会被
+   401 拒绝：`$env:DSH_SIM_IDENTITY_MODE="dev"`（bash：`export DSH_SIM_IDENTITY_MODE=dev`）。
 2. 重启 dsh web（或等 cordis 配置热载）。
 3. 会话内确认 12 个工具出现：`mcp__dsh-sim__list_capabilities` …
    `mcp__dsh-sim__draft_review_issue`（与 §1 左列一一对应）。

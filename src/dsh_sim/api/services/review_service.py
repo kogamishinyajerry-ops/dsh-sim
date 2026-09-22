@@ -18,10 +18,12 @@ from dsh_sim.db.models import (
     ArtifactRow,
     BundleRow,
     DecisionRow,
+    IssueClosureRow,
     IssueReplyRow,
     ReviewIssueRow,
     ReviewRow,
     RunRow,
+    TaskRow,
     utcnow,
 )
 from dsh_sim.domain.errors import ApiError, ErrorCode
@@ -30,6 +32,8 @@ from dsh_sim.domain.schemas import (
     Bundle,
     BundleManifestEntry,
     Decision,
+    IssueClosure,
+    IssueClosureEvidence,
     IssueReply,
     Review,
     ReviewIssue,
@@ -191,6 +195,13 @@ def _issue_model(session: Session, issue: ReviewIssueRow) -> ReviewIssue:
         .order_by(IssueReplyRow.created_at)
         .all()
     )
+    # 关闭记录一并回放：关闭人/被关闭版本/实际证据/绑定包与时间可从历史完整回看
+    closures = (
+        session.query(IssueClosureRow)
+        .filter_by(issue_id=issue.issue_id)
+        .order_by(IssueClosureRow.closed_at)
+        .all()
+    )
     return ReviewIssue(
         issue_id=issue.issue_id,
         review_id=issue.review_id,
@@ -210,6 +221,19 @@ def _issue_model(session: Session, issue: ReviewIssueRow) -> ReviewIssue:
                 created_at=r.created_at,
             )
             for r in replies
+        ],
+        closures=[
+            IssueClosure(
+                closure_id=c.closure_id,
+                issue_id=c.issue_id,
+                issue_version=c.issue_version,
+                closed_by=c.closed_by,
+                bundle_digest=c.bundle_digest,
+                evidence=[IssueClosureEvidence(**e) for e in (c.evidence or [])],
+                confirmation_id=c.confirmation_id,
+                closed_at=c.closed_at,
+            )
+            for c in closures
         ],
         status=issue.status,
         version=issue.version,
@@ -353,6 +377,9 @@ def close_issue(
         raise ApiError(
             ErrorCode.ENGINEERING_INPUT, "关闭问题必须附关闭证据 artifact（关闭需审查人确认+证据）"
         )
+    # 上游报告问题 4：关闭证据必须校验（存在性/归属/已提交/适用性/摘要一致），
+    # 并在同一事务内持久化为不可变的关闭记录（回复文本不等于关闭证据）。
+    evidence = _validate_close_evidence(session, review, close_evidence_artifact_ids)
     consume_confirmation(
         session,
         identity,
@@ -361,12 +388,96 @@ def close_issue(
         target_id=issue_id,
         target_digest=review.bundle_digest,
     )
+    now = utcnow()
+    closed_version = issue.version
     issue.status = "CLOSED"
     issue.closed_by = identity.subject_id
-    issue.closed_at = utcnow()
+    issue.closed_at = now
     issue.version += 1
+    session.add(
+        IssueClosureRow(
+            closure_id=_new_id("closure"),
+            issue_id=issue.issue_id,
+            issue_version=closed_version,
+            closed_by=identity.subject_id,
+            bundle_digest=review.bundle_digest,
+            evidence=evidence,
+            confirmation_id=confirmation_id,
+            closed_at=now,
+        )
+    )
     session.flush()
     return _issue_model(session, issue)
+
+
+def _validate_close_evidence(
+    session: Session, review: ReviewRow, artifact_ids: list[str]
+) -> list[dict[str, Any]]:
+    """校验关闭证据并返回规范化条目（去重保序）。
+
+    拒绝：不存在、未提交（TEMP）、其他项目、不属于本次审查冻结包（不适用）、
+    以及摘要与冻结值不一致（冻结后被替换）的证据。
+    """
+    task = session.get(TaskRow, review.task_id)
+    bundle = session.get(BundleRow, review.bundle_id)
+    frozen = {
+        entry["artifact_id"]: entry for entry in (bundle.manifest if bundle is not None else [])
+    }
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for artifact_id in artifact_ids:
+        if artifact_id in seen:
+            continue
+        seen.add(artifact_id)
+        art = session.get(ArtifactRow, artifact_id)
+        if art is None:
+            raise ApiError(
+                ErrorCode.ENGINEERING_INPUT,
+                "关闭证据不存在",
+                details={"artifact_id": artifact_id},
+            )
+        if art.state != "COMMITTED":
+            raise ApiError(
+                ErrorCode.ENGINEERING_INPUT,
+                "关闭证据必须是已提交 artifact（TEMP 不能作为关闭证据）",
+                details={"artifact_id": artifact_id, "state": art.state},
+            )
+        if task is None or art.project_id != task.project_id:
+            raise ApiError(
+                ErrorCode.FORBIDDEN,
+                "关闭证据不属于本项目",
+                details={
+                    "artifact_id": artifact_id,
+                    "project_id": art.project_id,
+                    "expected_project_id": task.project_id if task is not None else None,
+                },
+            )
+        entry = frozen.get(artifact_id)
+        if entry is None:
+            raise ApiError(
+                ErrorCode.ENGINEERING_INPUT,
+                "关闭证据不属于本次审查的冻结包（不适用）",
+                details={"artifact_id": artifact_id, "bundle_id": review.bundle_id},
+            )
+        if entry.get("sha256") != art.sha256:
+            raise ApiError(
+                ErrorCode.CONFLICT_DIGEST,
+                "关闭证据与冻结包摘要不一致（证据在冻结后已被替换）",
+                details={
+                    "artifact_id": artifact_id,
+                    "frozen_sha256": entry.get("sha256"),
+                    "current_sha256": art.sha256,
+                },
+            )
+        out.append(
+            {
+                "artifact_id": artifact_id,
+                "sha256": art.sha256,
+                "logical_path": art.logical_path,
+                "role": entry.get("role"),
+            }
+        )
+    return out
 
 
 def _require_reviewer(identity: Identity, review: ReviewRow) -> None:

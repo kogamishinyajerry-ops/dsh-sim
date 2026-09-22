@@ -115,6 +115,8 @@ HTTP 映射：401 未认证 / 403 越权 / 409 摘要·修订·幂等冲突 / 42
 # 安装/同步依赖
 <USER_HOME>\.workbuddy\binaries\python\envs\default\Scripts\pip.exe install -e .
 # 起工程服务（开发库 SQLite）
+# 身份模式 fail-closed：本地联调必须显式声明开发模式，否则 X-Dev-* 头一律 401
+# PowerShell: $env:DSH_SIM_IDENTITY_MODE="dev"  /  bash: export DSH_SIM_IDENTITY_MODE=dev
 <USER_HOME>\.workbuddy\binaries\python\envs\default\Scripts\uvicorn.exe dsh_sim.api.main:app --port 8600
 # 起 MCP server（stdio，供 dsh 接入）
 <PYTHON_ENV>\Scripts\python.exe -m dsh_sim.mcp.server

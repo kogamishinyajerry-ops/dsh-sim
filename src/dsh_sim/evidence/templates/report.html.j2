@@ -49,6 +49,16 @@
     spec 摘要 <code>{{ spec_sha256 }}</code> · 创建人 {{ owner_id }}
   </p>
   <p>用途：{{ purpose }}（内部方案筛选；不构成适航符合性结论） · 审查范围：{{ review_scope }} · 方法包：{{ capability_package_id }}</p>
+  {% if method_package %}
+  <p class="meta">
+    方法包冻结：<code>{{ method_package.capability_package_id }}@{{ method_package.version }}</code>
+    · 状态 {{ method_package.status }}
+    · manifest 摘要 <code>{{ method_package.manifest_sha256 }}</code>
+    · 规格声明摘要 <code>{{ method_package.declared_sha256 }}</code>
+    {% if not method_package.digest_match %}<br><strong>差异：规格声明的方法包摘要与本次冻结版本不一致——方法版本已变化，规则未被静默替换，请审查后决定。</strong>{% endif %}
+    {% if not method_package.released %}<br><strong>注意：该方法包状态为 {{ method_package.status }}（非 RELEASED），不能据此宣称方法已获批准。</strong>{% endif %}
+  </p>
+  {% endif %}
 </header>
 
 <h2>多维状态（逐 Run；执行成功 ≠ 数值通过 ≠ 方法适用）</h2>

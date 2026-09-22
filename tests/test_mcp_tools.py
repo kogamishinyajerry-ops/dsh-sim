@@ -83,6 +83,7 @@ def api(tmp_path, monkeypatch) -> SimpleNamespace:
     app = create_app(
         database_url=f"sqlite:///{(tmp_path / 'mcp.db').as_posix()}",
         artifact_root=tmp_path / "artifacts",
+        identity_mode="dev",  # 身份模式 fail-closed：测试显式声明本地开发模式
     )
     _mount_get_task(app)
     agent_client = httpx.AsyncClient(

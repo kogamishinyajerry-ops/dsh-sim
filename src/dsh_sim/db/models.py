@@ -325,6 +325,26 @@ class IssueReplyRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class IssueClosureRow(Base):
+    """问题关闭记录（追加式；上游报告问题 4）。
+
+    关闭人、被关闭的问题版本、实际关闭证据（artifact ID + 摘要 + 逻辑路径 + 角色）、
+    绑定的冻结包摘要与时间**同一事务**落库；追加后不可改、不可删，
+    历史决定可从记录完整回看。回复文本不等于关闭证据。
+    """
+
+    __tablename__ = "issue_closures"
+
+    closure_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    issue_id: Mapped[str] = mapped_column(ForeignKey("issues.issue_id"), index=True)
+    issue_version: Mapped[int] = mapped_column(Integer)  # 被关闭时的 issue.version
+    closed_by: Mapped[str] = mapped_column(String(128))
+    bundle_digest: Mapped[str] = mapped_column(String(64))  # 关闭时绑定的冻结包
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    confirmation_id: Mapped[str] = mapped_column(String(64))
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class DecisionRow(Base):
     __tablename__ = "decisions"
 
@@ -441,6 +461,25 @@ def _bundle_manifest_immutable(mapper, connection, target: BundleRow) -> None:  
             )
 
 
+@event.listens_for(IssueClosureRow, "before_update")
+def _issue_closure_immutable(mapper, connection, target: IssueClosureRow) -> None:  # noqa: ANN001
+    """关闭记录追加后不可改写（定义书 §接受后的历史）。"""
+    raise ApiError(
+        ErrorCode.CONFLICT_REVISION,
+        "问题关闭记录不可变；新的关闭必须新增记录",
+        details={"closure_id": target.closure_id},
+    )
+
+
+@event.listens_for(IssueClosureRow, "before_delete")
+def _issue_closure_no_delete(mapper, connection, target: IssueClosureRow) -> None:  # noqa: ANN001
+    raise ApiError(
+        ErrorCode.CONFLICT_REVISION,
+        "问题关闭证据不被删除（定义书 §接受后的历史）",
+        details={"closure_id": target.closure_id},
+    )
+
+
 @event.listens_for(DecisionRow, "before_update")
 def _decision_immutable(mapper, connection, target: DecisionRow) -> None:  # noqa: ANN001
     """已接受决定保持不可变；新输入使其失效而非删除（定义书 §接受后的历史）。"""
@@ -472,6 +511,7 @@ __all__ = [
     "EventRow",
     "HumanConfirmationRow",
     "IdempotencyRecordRow",
+    "IssueClosureRow",
     "IssueReplyRow",
     "JobRow",
     "LeaseRow",

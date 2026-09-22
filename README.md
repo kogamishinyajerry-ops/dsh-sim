@@ -15,6 +15,8 @@
 ```bash
 # 工程 API（含双面板静态托管）
 cd dsh-sim
+# 身份模式 fail-closed：本地联调必须显式声明开发模式，否则 X-Dev-* 自报身份头一律 401
+export DSH_SIM_IDENTITY_MODE=dev        # PowerShell: $env:DSH_SIM_IDENTITY_MODE="dev"
 <PYTHON_ENV>\Scripts\python.exe -m uvicorn dsh_sim.api.main:app --port 8600
 # 执行台  http://127.0.0.1:8600/panels/executor/index.html
 # 审查台  http://127.0.0.1:8600/panels/reviewer/index.html
@@ -26,7 +28,12 @@ cd dsh-sim
 # 自检：python scripts/selfcheck.py
 ```
 
-开发模式身份头：`X-Dev-Subject` / `X-Dev-Roles`（EXECUTOR/REVIEWER/CAPABILITY_OWNER/NODE_ADMIN/AGENT）——生产必须换受信 IdP（TBD-08）。
+身份模式（`DSH_SIM_IDENTITY_MODE`，默认 **prod**）：
+- **`dev` / `development` / `local`**：接受 `X-Dev-Subject` / `X-Dev-Roles`
+  （EXECUTOR/REVIEWER/CAPABILITY_OWNER/NODE_ADMIN/AGENT）/ `X-Dev-Projects` 自报头，仅供本地/隔离环境。
+- 其它一切取值（含未设置、空值、无法识别）→ **生产模式：拒绝全部自报身份头（401）**。
+  生产用户主体与权限必须来自受信身份提供方（TBD-08），未完成前不接受任何自报身份，
+  界面角色下拉框不是安全边界。
 
 ## 状态墙
 

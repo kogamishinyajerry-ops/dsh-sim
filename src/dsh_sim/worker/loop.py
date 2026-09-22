@@ -12,7 +12,8 @@ HTTP 自回环；跨机部署时替换为 POST /jobs/claim + /jobs/{id}/events�
 - COMPLETED：exit_code + 已提交 artifact 集合；
 - FAILED/CANCELLED：原因 + 退出证明/退出码。
 
-断线语义：事件先写本地 WAL（worker/wal.py），上报成功后标 ack；恢复后按序重传。
+断线语义：事件先写本地 WAL（worker/wal.py），上报**数据库提交成功之后**才标 ack；
+恢复后按序重传，幂等序号保证重复重放安全（问题 3：先 commit 后 ACK）。
 控制参数全部走 DSH_SIM_WORKER_* env（不写死；心跳 15s/租约 90s/失联 3 次为
 queue 层既定默认，定义书 §并发断线取消与补算规则）。
 """
@@ -149,7 +150,19 @@ class _EventChannel:
 
 
 def replay_wal(session: Session, wal: JsonlWal) -> int:
-    """恢复后按序重传未确认事件；租约已失效的记录不再重传（Job 已转 LOST 待核实）。"""
+    """恢复后按序重传未确认事件；租约已失效的记录不再重传（Job 已转 LOST 待核实）。
+
+    上游验收报告问题 3（2026-09-22）：顺序必须是 **DB commit → 本地 mark_acked**。
+    旧实现逐项先 mark_acked、循环外才统一 commit：提交失败或进程在窗口内崩溃时
+    本地认为已上报、数据库却没有该事件，而该记录已标记 acked 不会再重放——
+    事件永久丢失。现在每条记录走独立的 post → commit → ack：
+
+    - 提交失败（或崩溃在 ack 之前）：记录保持未 ACK 原样留在 WAL，下次重放；
+    - 提交成功后才确认本地 ACK；提交后/ACK 前崩溃 → 下次重放同一事件，
+      服务端 (job_id,event_seq) 唯一约束 + 幂等返回使重复重放不产生重复事件、
+      也不制造非法状态迁移（终态事件不覆盖已撤销，非法中间态按原样跳过）；
+    - 租约失效 / 序号空洞 / 状态冲突：保留待人工核查，不静默丢弃。
+    """
     sent = 0
     for rec in wal.unacked():
         lease = session.get(LeaseRow, rec["lease_id"])
@@ -165,10 +178,26 @@ def replay_wal(session: Session, wal: JsonlWal) -> int:
                 kind=rec["kind"],
                 payload=rec["payload"],
             )
+            session.commit()  # ① 先确认数据库提交（失败则不 ACK，记录可重放）
         except ApiError:
+            # post_event 的 ApiError 全部发生在 session.add(event) 之前（kind 校验、
+            # job/租约/fencing/序号/状态校验），没有待丢弃的写入，因此**不调用
+            # rollback**：Session.rollback() 会让事务提前失活，而 SQLite 连接级
+            # BEGIN IMMEDIATE 的保留锁此时不会落到 DBAPI，要等下一次真实 commit 才
+            # 释放（db/session.py）。留着事务让后续 commit 正常收尾，锁才不滞留。
             continue  # 序号空洞/状态冲突：保留待核查，不静默丢弃
-        wal.mark_acked(rec["job_id"], rec["event_seq"])
+        except Exception:
+            # 提交失败：丢弃挂起写入并**丢弃底层连接**。SQLite 下 rollback 不会释放
+            # BEGIN IMMEDIATE 的保留锁（db/session.py 的 begin 事件绕过了 DBAPI 事务
+            # 跟踪），连接带着锁归还连接池会阻塞其它连接；invalidate() 关闭连接才
+            # 真正放锁。记录保持未 ACK，留在 WAL 供下次重放。
+            session.invalidate()
+            raise
+        wal.mark_acked(rec["job_id"], rec["event_seq"])  # ② 提交成功后才确认本地 ACK
         sent += 1
+    # 收尾：结束租约查找开启的事务（SQLite 下 begin 事件把所有事务提升为
+    # BEGIN IMMEDIATE，不释放会阻塞其它连接；无待提交写入时提交为空操作）。
+    # 全部记录都走 ApiError 分支时，这一步同时负责释放保留锁。
     session.commit()
     return sent
 

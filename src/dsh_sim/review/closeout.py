@@ -15,20 +15,29 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from dsh_sim.db.models import (
-    ArtifactRow,
     BundleRow,
     DecisionRow,
     ReviewIssueRow,
     ReviewRow,
-    RunRow,
-    VerificationRow,
 )
-from dsh_sim.evidence.bundle import compute_completeness
+from dsh_sim.domain.errors import ApiError
+from dsh_sim.evidence.bundle import (
+    compute_completeness_manifest,
+    manifest_snapshot,
+    verify_bundle_integrity,
+)
 from dsh_sim.review.acceptance import run_acceptance_blockers
 
 
 def bundle_blockers(session: Session, review: ReviewRow) -> dict[str, Any]:
-    """ACCEPT 门的包维度阻塞（并入 decide_review 的 problems，逐条列因）。"""
+    """ACCEPT 门的包维度阻塞（并入 decide_review 的 problems，逐条列因）。
+
+    上游验收报告问题 1（2026-09-22）：冻结包是验收对象，不能被后来的补算"补绿"。
+    验收输入一律取**冻结快照**（manifest 裁剪），而不是当前 Run/attempt 全集：
+    - 完整性按 manifest 集合重算（冻结后新证据不入旧包的 completeness）；
+    - digest 与文件字节按冻结值核对（改一字节/来源缺失即阻塞）；
+    - 正向门（run/attempt 证据）同样只看冻结集合内对象。
+    """
     problems: dict[str, Any] = {}
     bundle = session.get(BundleRow, review.bundle_id)
     if bundle is None:
@@ -39,21 +48,23 @@ def bundle_blockers(session: Session, review: ReviewRow) -> dict[str, Any]:
         problems["bundle_stale"] = [
             {"bundle_id": bundle.bundle_id, "validity": bundle.validity}
         ]
-    completeness = compute_completeness(session, review.task_id, review.revision)
+    # 冻结包完整性：digest 绑定 + 字节级校验（问题 1 核心）
+    problems.update(verify_bundle_integrity(session, bundle))
+    # 验收输入裁剪到冻结集合；来源缺失（manifest 引用 artifact 不存在）直接阻塞
+    try:
+        runs, artifacts, verifications = manifest_snapshot(session, bundle)
+    except ApiError as exc:
+        problems["bundle_source_missing"] = exc.details.get(
+            "missing_artifact_ids", [review.bundle_id]
+        )
+        return problems
+    completeness = compute_completeness_manifest(
+        session, bundle, runs, artifacts, verifications
+    )
     if not completeness["complete"]:
         problems["bundle_incomplete"] = completeness["missing"]
     # Positive gates: NOT_CHECKED, OUT_OF_SCOPE, UNKNOWN and previous-attempt
     # evidence cannot slip through the legacy negative-state checks.
-    runs = session.query(RunRow).filter_by(
-        task_id=review.task_id, revision=review.revision
-    ).all()
-    run_ids = [run.run_id for run in runs]
-    artifacts = session.query(ArtifactRow).filter(
-        ArtifactRow.run_id.in_(run_ids)
-    ).all() if run_ids else []
-    checks = session.query(VerificationRow).filter(
-        VerificationRow.run_id.in_(run_ids)
-    ).all() if run_ids else []
     problems.update(run_acceptance_blockers(
         [
             {name: getattr(run, name) for name in (
@@ -69,11 +80,11 @@ def bundle_blockers(session: Session, review: ReviewRow) -> dict[str, Any]:
             for art in artifacts
         ],
         [
-            {name: getattr(check, name) for name in (
+            {name: check.get(name) for name in (
                 "verification_id", "run_id", "attempt_id", "conclusion",
                 "source_artifact_ids",
             )}
-            for check in checks
+            for check in verifications
         ],
     ))
     drafts = (
