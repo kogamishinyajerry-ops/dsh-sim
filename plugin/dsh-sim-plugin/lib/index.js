@@ -22,6 +22,7 @@ const DEFAULT_CONFIG = {
 // 与 dsh-settings 的 zod-like schema 对齐（参考 dsh-visual-plugin 0.3.2 用法：
 // settings.register(NS, ConfigSchema, { base })。schema 用 dsh-schemastery z）
 import z from "@deepseek-ai/schemastery";
+import { upstreamOf, proxyFetch, ProxyRequestError } from "./proxy.mjs";
 
 const SimConfig = z.object({
   apiUrl: z.string().min(1).default(DEFAULT_CONFIG.apiUrl),
@@ -38,49 +39,6 @@ function writeJson(res, code, body) {
     "cache-control": "no-store",
   });
   res.end(payload);
-}
-
-function apiRootOf(config) {
-  // apiUrl 形如 http://host:8600/api/v1；apiRoot 为 http://host:8600
-  const u = new URL(config.apiUrl);
-  return u.origin;
-}
-
-function upstreamOf(config, req) {
-  // 路径映射（定义书 FR-32：只允许两个白名单前缀，防任意路径逃逸）：
-  //   /dsh-sim/api/*    → {apiUrl}/*          （工程 API，如 /tasks、/artifacts/{id}/content）
-  //   /dsh-sim/panels/* → {apiRoot}/panels/*  （面板静态页，挂在服务根而非 /api/v1 下）
-  const url = new URL(req.url ?? "/", "http://localhost");
-  if (url.pathname !== "/dsh-sim" && !url.pathname.startsWith("/dsh-sim/")) return null;
-  const rest = url.pathname.slice("/dsh-sim".length).replace(/^\//, "");
-  if (rest.startsWith("api/")) {
-    return new URL(rest.slice(4) + url.search, config.apiUrl.replace(/\/+$/, "") + "/");
-  }
-  if (rest.startsWith("panels/")) {
-    return new URL(rest + url.search, apiRootOf(config) + "/");
-  }
-  return null;
-}
-
-async function proxyFetch(config, req, upstream) {
-  // 面板自带 X-Dev-* 头时透传（同事各自的身份）；缺省用插件 settings 注入
-  const headers = {
-    "X-Dev-Subject": req.headers["x-dev-subject"] ?? config.subject,
-    "X-Dev-Roles": req.headers["x-dev-roles"] ?? config.roles,
-    "X-Dev-Projects": req.headers["x-dev-projects"] ?? config.projects,
-  };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  try {
-    return await fetch(upstream, {
-      method: req.method ?? "GET",
-      headers,
-      signal: controller.signal,
-      redirect: "error",
-    });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function registerSimRoutes(webServer, getConfig) {
@@ -110,7 +68,8 @@ function registerSimRoutes(webServer, getConfig) {
     },
   });
 
-  // 面板静态页与 API 的通用前缀代理（GET only，POST 走 DSH 会话内工具或受信面板）
+  // 同源面板代理：静态资源只读；API 转发 GET/HEAD/POST 与幂等键及请求体。
+  // X-Dev 身份仍只适用于本地开发，不构成生产身份隔离。
   // 注意：kind:"prefix" 的 path 必须不带尾斜杠（"/dsh-sim"），
   // 带尾斜杠的 "/dsh-sim/" 只匹配字面根路径，子路径 404（参照
   // dsh-visual-plugin 的 "/vision-bridge/videos" 无前导/尾随斜杠写法）。
@@ -130,9 +89,14 @@ function registerSimRoutes(webServer, getConfig) {
         res.writeHead(r.status, {
           "content-type": r.headers.get("content-type") ?? "application/octet-stream",
           "cache-control": "no-store",
+          ...(r.headers.get("x-trace-id") ? { "x-trace-id": r.headers.get("x-trace-id") } : {}),
         });
         res.end(body);
       } catch (err) {
+        if (err instanceof ProxyRequestError) {
+          writeJson(res, err.status, { code: err.code, message: err.message, retryable: false });
+          return;
+        }
         writeJson(res, 503, {
           code: "UNAVAILABLE",
           message: "工程服务不可用（检查设置中的 apiUrl 与服务进程）",
