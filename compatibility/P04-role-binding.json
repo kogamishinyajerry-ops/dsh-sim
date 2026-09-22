@@ -1,0 +1,33 @@
+{
+  "probe_id": "P04",
+  "name": "角色绑定",
+  "target": "边界名称、面积/质心等必要签名与人工标识一致",
+  "executed_at": "2026-09-20T22:05:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+  },
+  "commands": [
+    "(边界名/类型签名已由 P03 探针宏真实枚举, 见 p03_write_readback.log)",
+    "starccm+.bat p03_template.sim -batch BoundarySignatureProbe.java (面积签名采集尝试 → 宏编译失败)"
+  ],
+  "output_excerpts": [
+    "P03 宏枚举(真实): z_min=速度入口, z_max=压力出口, 其余 6 边界=壁面 (cyl_vortex_v153R_fixinlet.sim)",
+    "BoundarySignatureProbe.java:16: 错误: 找不到符号 — b.getBoundarySurfaceMeshArea() 在此 API 不存在; 面积/质心签名采集 API 本次未确认"
+  ],
+  "collected_real_signatures": {
+    "names_types": "已采集(见 P03 boundary_inventory_real)",
+    "area_centroid": "未采集 — 需 WP-06 录宏确认 2402 上正确的边界面积/质心读取 API(候选: ReportManager SurfaceIntegralReport / 边界网格 NeoProperty)"
+  },
+  "missing_dependency": "能力包 boundary-map.json(工程角色→软件对象与签名的人工标识表)不存在 — TBD-05 / WP-03(R4); 无人工标识则'一致'无法判定",
+  "evidence_files": [
+    "compatibility/raw/p03_write_readback.log",
+    "compatibility/raw/p04_area_api_fail.log"
+  ],
+  "conclusion": "NOT_RUN",
+  "unblock_conditions": [
+    "R4/Owner 交付批准的 boundary-map.json(人工标识的角色→边界映射)",
+    "WP-06 录宏确认面积/质心签名 API 并采集真实签名",
+    "按定义书: 不能可靠匹配时停止准备, 不猜测映射"
+  ]
+}

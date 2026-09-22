@@ -1,0 +1,87 @@
+{
+  "capability_package_id": "buffer_chamber",
+  "version": "0.1.0",
+  "description": "指标计算框架（定义书 §指标定义：先保证比较的是同一件事）。具体截面、符号、归一化尺度、适用域与容差由业务方法包批准；本文件所有工程阈值一律 null + TBD，属 Owner 冻结项（TBD-06），未冻结时拒绝 RELEASED。",
+  "metrics": [
+    {
+      "metric_id": "boundary_mass_flow",
+      "name": "边界质量流量",
+      "definition": "统一采用对计算域向外为正的有符号质量流量 m_b。保留原软件符号及转换记录；入口通常负、出口通常正。",
+      "mandatory_checks": [
+        "记录原始软件符号约定与转换过程",
+        "每个边界角色的流量值必须来自真实回读/原始报告，不得估读"
+      ],
+      "unit": "kg/s",
+      "tolerance": null,
+      "tolerance_note": "TBD: Owner 冻结"
+    },
+    {
+      "metric_id": "steady_mass_imbalance",
+      "name": "稳态质量不平衡",
+      "definition": "单相、无质量源、稳态范围：abs(sum_b m_b) / max(sum_in abs(m_b), m_floor)。接近零流量时标记不适用，不能靠分母掩盖错误。",
+      "mandatory_checks": [
+        "确认单相、无质量源、稳态前提成立",
+        "分母使用 m_floor 保护尺度时必须记录其值与来源"
+      ],
+      "unit": "dimensionless",
+      "m_floor": null,
+      "m_floor_note": "TBD: Owner 冻结。m_floor 是带 kg/s 单位的批准保护尺度。",
+      "tolerance": null,
+      "tolerance_note": "TBD: Owner 冻结。质量不平衡容差属『不能让本次开发填的工程阈值』。"
+    },
+    {
+      "metric_id": "total_pressure_loss",
+      "name": "总压损失",
+      "definition": "在批准入口/出口截面比较质量流量加权总压；多出口合成必须有批准权重与定义。存在强回流时禁止套用简单正向权重，转为不适用或专门规则。",
+      "mandatory_checks": [
+        "截面位置经批准且与边界角色映射一致",
+        "总压/静压语义明确，不因单位同为 Pa 就混用",
+        "检查回流状态；强回流时不得套用简单正向权重"
+      ],
+      "unit": "Pa",
+      "approved_sections": null,
+      "approved_weights": null,
+      "reference_tolerance": null,
+      "tolerance_note": "TBD: Owner 冻结"
+    },
+    {
+      "metric_id": "outlet_distribution",
+      "name": "出口分配",
+      "definition": "适用的正向出流范围内，f_i = m_i / sum_out m_i；出口和、符号与回流状态同时检查。",
+      "mandatory_checks": [
+        "出口和、符号、回流状态同时检查",
+        "分母为零或接近零时标记不适用，不输出伪分配比"
+      ],
+      "unit": "dimensionless",
+      "tolerance": null,
+      "tolerance_note": "TBD: Owner 冻结"
+    },
+    {
+      "metric_id": "ab_delta",
+      "name": "A/B变化",
+      "definition": "差值 = B - A；相对变化仅在 abs(A) 大于批准参考下限时计算，否则显示绝对差或『相对值不适用』。",
+      "mandatory_checks": [
+        "A/B 对比必须同工况、同截面、同指标定义口径",
+        "定义不一致时禁止给出改进幅度"
+      ],
+      "unit": "depends_on_base_metric",
+      "reference_floor": null,
+      "reference_floor_note": "TBD: Owner 冻结。批准参考下限未冻结前，相对变化一律显示『相对值不适用』。"
+    },
+    {
+      "metric_id": "monitor_stability",
+      "name": "监控稳定性",
+      "definition": "批准窗口内监控量的变化幅度/趋势及最小采样长度；窗口、尺度与允许值由规则包给定。残差曲线是证据之一。",
+      "mandatory_checks": [
+        "监控窗口与最小采样长度满足规则包给定值",
+        "残差曲线作为证据之一随数据保存"
+      ],
+      "unit": "depends_on_monitored_quantity",
+      "window": null,
+      "min_samples": null,
+      "allowed_variation": null,
+      "tolerance_note": "TBD: Owner 冻结。监控窗口属『不能让本次开发填的工程阈值』。"
+    }
+  ],
+  "extraction_rule": "软件原始报告、CSV 与日志只读保存；独立 Python 函数复算守恒、分配及 A/B 差值。缺值、NaN、单位错误、来源不明、工况不匹配都生成明确 finding；禁止将缺值填 0、从云图估读或由语言模型推测数值（定义书 §原始数据与派生数据分开）。"
+}

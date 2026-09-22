@@ -1,0 +1,43 @@
+{
+  "probe_id": "P02",
+  "name": "模板打开/保存",
+  "target": "模板副本可打开与保存，原件摘要不变",
+  "executed_at": "2026-09-20T21:56:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)",
+    "star_executable": "C:\\Program Files\\Siemens\\19.02.009-R8\\STAR-CCM+19.02.009-R8\\star\\bin\\starccm+.bat"
+  },
+  "template": {
+    "source": "<STARCCM_CLI_DIR>\\Cases\\cyl_flow_v5.sim",
+    "source_sha256_before": "f5a5c502341c5dbf75299c30d27c8ca0f2d096acc0fa35101a55a17ab68de3f3",
+    "source_sha256_after": "f5a5c502341c5dbf75299c30d27c8ca0f2d096acc0fa35101a55a17ab68de3f3",
+    "work_copy": "<TEMP>\\dsh_probe_p02\\template_copy.sim",
+    "saved_copy": "<TEMP>\\dsh_probe_p02\\prepared_copy.sim (333060 bytes, 与源 313627 bytes 不同 → 真实重新保存)"
+  },
+  "commands": [
+    "cp cyl_flow_v5.sim → template_copy.sim; sha256sum 前后对比",
+    "starccm+.bat template_copy.sim -batch SaveCopyProbe.java (v34 语法: sim 在前, -batch macro 在后)",
+    "对照: starccm_cli.py checkpoint ... (桥命令, 失败见 caveats)"
+  ],
+  "output_excerpts": [
+    "[SaveCopyProbe] opened sim: template_copy",
+    "[SaveCopyProbe] saved -> <TEMP>/dsh_probe_p02/prepared_copy.sim",
+    "[SaveCopyProbe] DONE (exit=0)",
+    "原件 sha256 前后一致: f5a5c502341c5dbf75299c30d27c8ca0f2d096acc0fa35101a55a17ab68de3f3"
+  ],
+  "bridge_defect_observed": {
+    "command": "python starccm_cli.py checkpoint <sim> --out-sim ... --json",
+    "result": "ok=false, error.code=SPAWN_RC, rc=2, elapsed_sec=0.08, 空输出",
+    "root_cause": "checkpoint 命令(starccm_cli_v15_solver.py:327 同款旧顺序)仍用 [bat, -batch, macro, sim, args...]; 本机构建 19.02.009 只接受 [bat, sim, -batch, macro] 且拒绝 -batch 后的额外位置参数(桥自身注释 starccm_cli.py:88-91,9865-9867); 宏参数须烘焙进 .java 源码",
+    "fix_owner": "实现 Agent (StarCliAdapter) 须统一走 v34 语法 + 参数烘焙"
+  },
+  "evidence_files": [
+    "compatibility/raw/p02_savecopy.log"
+  ],
+  "conclusion": "PASS",
+  "caveats": [
+    "通过手动 v34 语法宏验证; CLI 桥 checkpoint 命令本身在此环境失败(缺陷已记录, 非探针目标通过依据)",
+    "模板为开发案例非批准模板; 正式 P02 复测须用能力包批准模板(TBD-05)"
+  ]
+}

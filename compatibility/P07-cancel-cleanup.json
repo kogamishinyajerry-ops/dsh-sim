@@ -1,0 +1,34 @@
+{
+  "probe_id": "P07",
+  "name": "取消清理",
+  "target": "所有相关求解进程停止，许可证释放可观察",
+  "executed_at": "2026-09-20T22:10:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+  },
+  "scenario": "启动超长续算(step(200000)) → 确认 RUNNING(iter=5005, ccmpsuite checked out) → taskkill /F /T /PID 5404 杀进程树 → 5s 后检查残留 → 重跑需 license 的 batch 验证 license 释放",
+  "commands": [
+    "starccm+.bat p05_solved_copy.sim -batch SolveLongProbe.java (后台启动)",
+    "taskkill /F /T /PID 5404 (根 launcher 进程树)",
+    "tasklist | grep star-ccm|starccm (残留检查)",
+    "starccm+.bat p03_written.sim -batch ReadbackPersistProbe.java (license 释放验证)"
+  ],
+  "output_excerpts": [
+    "启动: \"1 copy of ccmpsuite checked out\" / \"[P07] long run started iter=5005\"",
+    "进程树(运行中): starccm+.exe PID 5404/8536 + star-ccm+.exe PID 18372 (server)",
+    "taskkill: \"成功: 已终止 PID 18372 (属于 PID 8536 子进程)\" / \"成功: 已终止 PID 8536 (属于 PID 1944 子进程)\" / \"成功: 已终止 PID 1944 (属于 PID 5404 子进程)\" / \"成功: 已终止 PID 5404 (属于 PID 8256 子进程)\" — 树 5404→1944→8536→18372 全部终止",
+    "残留检查: tasklist grep star-ccm|starccm 无匹配(grep exit=1) — 无残留",
+    "license 释放验证: 后续 batch 重新 \"1 copy of ccmpsuite checked out\" 且 [P03R] DONE exit=0"
+  ],
+  "evidence_files": [
+    "compatibility/raw/p07_longrun_before_kill.log",
+    "compatibility/raw/p07_license_recheck.log"
+  ],
+  "conclusion": "PASS",
+  "caveats": [
+    "范围限定: 串行 batch(无 -np>1/MPI); 定义书 §作业生命周期要求 Windows Job Objects 管理进程组, MPI/launcher 子进程是否可完整控制仍需 TBD-02 探针(-np 2 场景)",
+    "本次验证的是'受控进程组终止'(taskkill /T 等价 Worker 兜底路径); '软件允许的优雅停止'(stop file / SimulationIterator stop)未测 — Worker 实现时先优雅后强杀的两级取消须补测",
+    "license 释放为间接证据(后续 checkout 成功), 非许可证服务器侧直接观察"
+  ]
+}

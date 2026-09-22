@@ -1,0 +1,1672 @@
+openapi: 3.1.0
+info:
+  title: DSH 工业仿真智能体 工程 API
+  version: 0.1.2
+  description: |
+    dsh-sim R0 工程能力真相入口（定义书 §工程API：业务操作 / §工程API：审查、节点与上传）。
+    MCP 是本 API 的受限投影。长操作返回 202 与资源 ID；请求返回不是计算结束。
+    所有产生副作用的 POST 必须携带 Idempotency-Key 头（主体+项目+action+key 唯一；
+    同 key 同摘要返回原对象，同 key 异摘要 → 409）。
+    错误对象统一为 Error{code,message,retryable,trace_id,details}。
+    本文件中的示例值均为占位：假哈希一律写作 "sha256:<64hex>" 形式，不含真实工程参数。
+servers:
+  - url: http://127.0.0.1:8600/api/v1
+tags:
+  - name: capabilities
+  - name: tasks
+  - name: preparations
+  - name: runs
+  - name: bundles
+  - name: reviews
+  - name: issues
+  - name: confirmations
+  - name: jobs
+  - name: artifacts
+  - name: projections
+  - name: verifications
+
+paths:
+  /capabilities:
+    get:
+      tags: [capabilities]
+      operationId: listCapabilities
+      summary: 查询当前域已发布能力包目录（游标分页）
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 能力包列表页
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapabilityPackage' }
+                  next_cursor: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks:
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: 创建任务草稿（符合 task-draft.schema.json）
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draft]
+              properties:
+                draft:
+                  type: object
+                  description: 符合 https://dsh-sim.local/contracts/task-draft.schema.json
+            example:
+              draft:
+                purpose: design_screening
+                open_questions:
+                  - field: conditions
+                    responsible: "<engineer_id>"
+                    question: "<missing input question>"
+      responses:
+        '201':
+          description: 已创建任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/revisions:
+    post:
+      tags: [tasks]
+      operationId: createRevision
+      summary: 创建新修订；expected_revision 防并发覆盖
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, spec]
+              properties:
+                expected_revision: { type: integer, minimum: 0 }
+                spec:
+                  type: object
+                  description: 符合 https://dsh-sim.local/contracts/task-spec.schema.json
+      responses:
+        '201':
+          description: 已创建修订（发布后不可原位修改）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskRevision' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/prepare:
+    post:
+      tags: [preparations]
+      operationId: prepareTask
+      summary: 异步创建准备作业（PREPARE）；不在该动作开始正式求解
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '202':
+          description: 准备作业已受理，返回准备 ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [preparation_id, job_id]
+                properties:
+                  preparation_id: { type: string }
+                  job_id: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /preparations/{preparation_id}:
+    get:
+      tags: [preparations]
+      operationId: getPreparation
+      summary: 读取准备结果：实际设置回读与差异
+      parameters:
+        - name: preparation_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 准备对象
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preparation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/authorizations:
+    post:
+      tags: [tasks]
+      operationId: authorizeRuns
+      summary: 人工运行授权；仅可信人工会话，Agent Bearer 始终拒绝
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision, preparation_id, prepared_digest, execution_budget, confirmation_id]
+              properties:
+                revision: { type: integer, minimum: 1 }
+                preparation_id: { type: string }
+                prepared_digest:
+                  type: string
+                  description: 人工确认时面板展示的 prepared 摘要
+                  example: "sha256:<64hex>"
+                execution_budget:
+                  type: object
+                  description: 预算，同 task-spec execution_budget 结构
+                confirmation_id:
+                  type: string
+                  description: createHumanConfirmation 签发的一次性确认凭据 ID
+      responses:
+        '201':
+          description: 授权已建立
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Authorization' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/submissions:
+    post:
+      tags: [runs]
+      operationId: submitRuns
+      summary: 依据已存在授权持久入队；准备摘要变化 409 拒绝
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [authorization_id, prepared_digest]
+              properties:
+                authorization_id: { type: string }
+                prepared_digest:
+                  type: string
+                  example: "sha256:<64hex>"
+      responses:
+        '202':
+          description: 已受理，返回 Run 集合
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_ids]
+                properties:
+                  run_ids:
+                    type: array
+                    items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /runs/{run_id}:
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: 查询多维状态与事件；事件按 after_seq 增量读取
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/AfterSeq'
+      responses:
+        '200':
+          description: Run 对象（含 after_seq 之后的增量事件）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /runs/{run_id}/cancel:
+    post:
+      tags: [runs]
+      operationId: cancelRun
+      summary: 受控取消（异步请求）；取消请求不等于已停止
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '202':
+          description: 取消请求已入库；全部受控子进程退出后才显示 CANCELLED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /runs/{run_id}/retry:
+    post:
+      tags: [runs]
+      operationId: retryRun
+      summary: 补算生成新 attempt；校验原因、策略与剩余预算
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, recovery_strategy]
+              properties:
+                reason: { type: string }
+                recovery_strategy:
+                  type: string
+                  description: 已批准的恢复策略标识
+      responses:
+        '202':
+          description: 新 attempt 已受理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attempt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/bundles:
+    post:
+      tags: [bundles]
+      operationId: buildBundle
+      summary: 异步构建冻结证据集合；检查必需 Run 与定义一致性
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: 冻结证据包已同步构建（缺必需工况标 incomplete 并阻塞 ACCEPT）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bundle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /bundles/{bundle_id}:
+    get:
+      tags: [bundles]
+      operationId: getBundle
+      summary: 读取冻结证据包清单与摘要
+      parameters:
+        - name: bundle_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bundle 对象
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bundle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/reviews:
+    post:
+      tags: [reviews]
+      operationId: submitReview
+      summary: 提交冻结包给预先指定的审查人；提交动作不等于接受
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision, bundle_id, bundle_digest, reviewer_id]
+              properties:
+                revision: { type: integer, minimum: 1 }
+                bundle_id: { type: string }
+                bundle_digest:
+                  type: string
+                  example: "sha256:<64hex>"
+                reviewer_id: { type: string }
+      responses:
+        '201':
+          description: 审查已创建（PENDING）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /reviews/{review_id}:
+    get:
+      tags: [reviews]
+      operationId: getReview
+      summary: 返回审查问题与有效性
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Review 对象
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /reviews/{review_id}/issues:
+    post:
+      tags: [issues]
+      operationId: createIssue
+      summary: 创建问题；模型创建的为 DRAFT，经 confirmIssue 人工确认转 OPEN
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [responsible, severity, description, close_criteria]
+              properties:
+                responsible: { type: string }
+                severity: { type: string, example: "<severity>" }
+                description: { type: string }
+                close_criteria: { type: string }
+                related_artifact_ids:
+                  type: array
+                  items: { type: string }
+                related_run_ids:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: 问题已创建（DRAFT）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /issues/{issue_id}/replies:
+    post:
+      tags: [issues]
+      operationId: replyIssue
+      summary: 回复问题并附新增证据；答复文本本身不能自动关闭问题
+      parameters:
+        - name: issue_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+                evidence_artifact_ids:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: 回复已记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /issues/{issue_id}/confirm:
+    post:
+      tags: [issues]
+      operationId: confirmIssue
+      summary: 指定审查人人工确认 DRAFT→OPEN；模型接口无此工具
+      parameters:
+        - name: issue_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issue_version, confirmation_id]
+              properties:
+                issue_version: { type: integer, minimum: 1 }
+                confirmation_id: { type: string }
+      responses:
+        '200':
+          description: 问题已转 OPEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /issues/{issue_id}/close:
+    post:
+      tags: [issues]
+      operationId: closeIssue
+      summary: 审查人核对回复与新增证据后关闭；一次性人工确认
+      parameters:
+        - name: issue_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issue_version, close_evidence_artifact_ids, confirmation_id]
+              properties:
+                issue_version: { type: integer, minimum: 1 }
+                close_evidence_artifact_ids:
+                  type: array
+                  items: { type: string }
+                confirmation_id: { type: string }
+      responses:
+        '200':
+          description: 问题已关闭
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /reviews/{review_id}/decisions:
+    post:
+      tags: [reviews]
+      operationId: decideReview
+      summary: 人工决定；服务端必检包摘要、修订有效性、Run 完整性、各项检查、无未关闭阻塞、职责分离
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, bundle_digest, revision, confirmation_id]
+              properties:
+                outcome:
+                  enum: [ACCEPT, REQUEST_CHANGES, REJECT]
+                bundle_digest:
+                  type: string
+                  example: "sha256:<64hex>"
+                revision: { type: integer, minimum: 1 }
+                limitations: { type: string }
+                confirmation_id: { type: string }
+      responses:
+        '201':
+          description: 决定已记录（不可变）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Decision' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /confirmations:
+    post:
+      tags: [confirmations]
+      operationId: createHumanConfirmation
+      summary: 受信 UI 会话发起一次性人工确认；绑定 action/target/digest，短期有效、单次消费，不向模型泄露凭据
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, target_id, target_digest]
+              properties:
+                action: { type: string, example: "<action e.g. authorizeRuns>" }
+                target_id: { type: string }
+                target_digest:
+                  type: string
+                  example: "sha256:<64hex>"
+      responses:
+        '201':
+          description: 确认凭据已签发（短期有效、单次消费）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [confirmation_id, expires_at]
+                properties:
+                  confirmation_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /jobs/claim:
+    post:
+      tags: [jobs]
+      operationId: claimJob
+      summary: Worker 领取作业；注册节点身份，短事务内锁行、校验配额、分配租约与 fencing token
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id, node_capabilities]
+              properties:
+                node_id: { type: string }
+                node_capabilities:
+                  type: object
+                  description: 节点能力与软件构建信息（占位）
+      responses:
+        '200':
+          description: 领取成功，返回 Job 与租约；无作业时 job 为 null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job]
+                properties:
+                  job:
+                    oneOf:
+                      - $ref: '#/components/schemas/Job'
+                      - type: 'null'
+                  lease: { $ref: '#/components/schemas/Lease' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /jobs/{job_id}/events:
+    post:
+      tags: [jobs]
+      operationId: postJobEvent
+      summary: Worker 上报事件；校验节点身份、当前租约、fencing_token、事件序号与允许的状态转换
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lease_id, fencing_token, event_seq, kind, payload]
+              properties:
+                lease_id: { type: string }
+                fencing_token: { type: integer, minimum: 1 }
+                event_seq: { type: integer, minimum: 1 }
+                kind:
+                  enum: [STARTING, RUNNING, HEARTBEAT, COMPLETED, FAILED, CANCELLED]
+                payload:
+                  type: object
+                  description: 按 kind 的最低载荷（定义书 §Worker协议的最低事件载荷）；可扩展，不下发代码
+      responses:
+        '202':
+          description: 事件已接收
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted]
+                properties:
+                  accepted: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /artifacts:
+    post:
+      tags: [artifacts]
+      operationId: registerArtifact
+      summary: 登记附件元数据（先临时后核验提交）；附件必须属于当前 Job
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [job_id, logical_path, length, sha256]
+              properties:
+                job_id: { type: string }
+                logical_path: { type: string }
+                length: { type: integer, minimum: 0 }
+                sha256:
+                  type: string
+                  example: "sha256:<64hex>"
+                run_id: { type: string }
+                attempt_id: { type: string }
+      responses:
+        '201':
+          description: 附件已登记（TEMP），返回受权上传地址
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifact_id, upload_url]
+                properties:
+                  artifact_id: { type: string }
+                  upload_url:
+                    type: string
+                    description: 受权一次性上传地址；不等于永久访问权
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /artifacts/{artifact_id}/content:
+    put:
+      tags: [artifacts]
+      operationId: uploadArtifactContent
+      summary: 受权流式上传内容；全量长度/哈希核验后原子提交（COMMITTED）；非配属节点不能写入
+      parameters:
+        - name: artifact_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: 上传核验通过，附件已 COMMITTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Artifact' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    get:
+      tags: [artifacts]
+      operationId: getArtifactContent
+      summary: 流式读取附件；每次读取验证主体与项目权限，不接受任意主机路径
+      parameters:
+        - name: artifact_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 附件内容流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ---------------------------------------------------------------------------
+  # 0.1.1 追加：读取投影端点（x-extension: read-projection；加性变更不破契约）
+  # 供执行/审查工作台消费；全部只读（recheck 除外，产生新 Verification 记录）。
+  # 所有投影响应带 evidence_mode（MOCK/REAL/UNKNOWN）；blocker 形状
+  # {code,message,responsible,action}。
+  # 0.1.2 追加：/tasks/{task_id}/events 跨 job 增量事件流（同 read-projection 风格）。
+  # ---------------------------------------------------------------------------
+
+  /tasks/{task_id}:
+    get:
+      tags: [projections]
+      operationId: getTaskProjection
+      summary: 读取任务投影（含 evidence_mode 与归一 blockers）
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task 投影
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Task'
+                  - type: object
+                    properties:
+                      evidence_mode: { enum: [REAL, MOCK, UNKNOWN] }
+                      blocker_objects:
+                        type: array
+                        items: { $ref: '#/components/schemas/Blocker' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/revisions/latest:
+    get:
+      tags: [projections]
+      operationId: getLatestRevisionProjection
+      summary: 当前修订投影
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 当前 TaskRevision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskRevision' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/runs:
+    get:
+      tags: [projections]
+      operationId: listRunProjection
+      summary: 矩阵投影 {items}——每 run 带 variant/condition/三维状态/事件与最新阶段
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Run 投影列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Run'
+                        - type: object
+                          properties:
+                            latest_stage: { type: string, nullable: true }
+                            latest_event_at: { type: string, format: date-time, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/events:
+    get:
+      tags: [projections]
+      operationId: listTaskEventsIncremental
+      summary: 跨 job 增量事件流——(occurred_at,event_seq) 全局排序重编号 global_seq，after_seq 增量拉取
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: after_seq
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: 上次响应的 next_after（global_seq 游标）；只返回其后的新事件。
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 200 }
+      responses:
+        '200':
+          description: 增量事件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [global_seq, job_id, event_seq, kind, payload, occurred_at]
+                      properties:
+                        global_seq: { type: integer, minimum: 1 }
+                        job_id: { type: string }
+                        event_seq: { type: integer, minimum: 1 }
+                        kind: { type: string }
+                        payload: { type: object }
+                        occurred_at: { type: string, format: date-time }
+                  next_after:
+                    type: integer
+                    minimum: 0
+                    description: 本次返回的最大 global_seq；无新事件时等于请求的 after_seq。
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/preparations/latest:
+    get:
+      tags: [projections]
+      operationId: getLatestPreparationProjection
+      summary: 最新准备投影——differences[].field/requested/readback/unit/boundary/status + blockers
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Preparation 投影
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Preparation'
+                  - type: object
+                    properties:
+                      ready: { type: boolean }
+                      evidence_mode: { enum: [REAL, MOCK, UNKNOWN] }
+                      blocker_objects:
+                        type: array
+                        items: { $ref: '#/components/schemas/Blocker' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/bundles/latest:
+    get:
+      tags: [projections]
+      operationId: getLatestBundleProjection
+      summary: 最新证据包投影（含 evidence_mode/complete/incomplete_items/uncovered_scope）
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Bundle 投影
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Bundle'
+                  - type: object
+                    properties:
+                      evidence_mode: { enum: [REAL, MOCK, UNKNOWN] }
+                      complete: { type: boolean }
+                      incomplete_items:
+                        type: array
+                        items: { type: object }
+                      uncovered_scope: { type: string }
+                      limitations: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /tasks/{task_id}/review-history:
+    get:
+      tags: [projections]
+      operationId: getReviewHistoryProjection
+      summary: 跨修订审查/决定历史（"当时接受 R1"与"当前 R2 尚未接受"两态可读，FR-23）
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 审查历史
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /bundles/{bundle_id}/manifest:
+    get:
+      tags: [projections]
+      operationId: getBundleManifestProjection
+      summary: 全量冻结清单投影（含 role/length/complete/incomplete_items/uncovered_scope）
+      x-extension: read-projection
+      parameters:
+        - name: bundle_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 证据包投影（manifest 条目含 artifact_id/logical_path/sha256/length/role）
+          content:
+            application/json:
+              schema:
+                type: object
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /bundles/{bundle_id}/claims:
+    get:
+      tags: [projections]
+      operationId: listBundleClaims
+      summary: 包内 Claim 列表（每条绑定 metric_id + artifact_id）
+      x-extension: read-projection
+      parameters:
+        - name: bundle_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Claim 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Claim' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /bundles/{bundle_id}/metrics:
+    get:
+      tags: [projections]
+      operationId: listBundleMetrics
+      summary: 包内指标投影（缺值保持 null 并 missing 标记，不填 0）
+      x-extension: read-projection
+      parameters:
+        - name: bundle_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 指标列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [metric_id, variant_id, condition_id, value, artifact_id, missing]
+                      properties:
+                        metric_id: { type: string }
+                        variant_id: { type: string }
+                        condition_id: { type: string }
+                        run_id: { type: string }
+                        value: { type: number, nullable: true }
+                        unit: { type: string }
+                        artifact_id: { type: string }
+                        missing: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /bundles/{bundle_id}/verifications:
+    get:
+      tags: [projections]
+      operationId: listBundleVerifications
+      summary: 包内 Verification 记录
+      x-extension: read-projection
+      parameters:
+        - name: bundle_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Verification 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Verification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /verifications:
+    get:
+      tags: [verifications]
+      operationId: listVerifications
+      summary: 按 task_id 或 run_id 读取复算记录
+      x-extension: read-projection
+      parameters:
+        - name: task_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: run_id
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Verification 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Verification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /verifications/recheck:
+    post:
+      tags: [verifications]
+      operationId: recheckVerification
+      summary: 独立复算（不照抄报告）：从原始 artifact 重算派生指标并产生新 Verification 记录
+      x-extension: read-projection
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [run_id]
+              properties:
+                run_id: { type: string }
+      responses:
+        '201':
+          description: 新 Verification 记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Verification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+      description: 幂等键；主体+项目+action+key 唯一。同 key 同请求摘要返回原对象；同 key 异摘要 → 409。
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+      description: 游标分页：上一页返回的 next_cursor。
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    AfterSeq:
+      name: after_seq
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      description: 事件增量读取：只返回 event_seq 大于该值的事件。
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: 401 未认证
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: 403 越权
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 409 摘要/修订/幂等冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: 422 工程输入不成立
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: 429 配额限制
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServiceUnavailable:
+      description: 503 暂不可用
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, trace_id, details]
+      properties:
+        code:
+          type: string
+          description: 字符串枚举错误码
+          example: "<ERROR_CODE>"
+        message: { type: string }
+        retryable:
+          type: boolean
+          description: 客户端只能对 retryable 与已定义状态采取有界重试
+        trace_id: { type: string, format: uuid }
+        details: { type: object }
+
+    Sha256:
+      type: string
+      description: SHA-256 摘要（64 位小写十六进制）；占位写作 sha256:<64hex>。哈希仅由服务计算。
+      example: "sha256:<64hex>"
+
+    Blocker:
+      type: object
+      required: [code, message, responsible, action]
+      description: 阻塞项统一形状（0.1.1 读取投影）：阻塞不是静默跳过
+      properties:
+        code: { type: string }
+        message: { type: string }
+        responsible: { type: string }
+        action: { type: string }
+
+    TaskFlowState:
+      enum: [DRAFT, PREPARING, READY, AUTHORIZED, ACTIVE, READY_FOR_REVIEW, IN_REVIEW, ACCEPTED, CHANGES_REQUESTED, REJECTED]
+    ExecutionState:
+      enum: [QUEUED, WAITING_RESOURCE, LEASED, STARTING, RUNNING, CANCELLING, COLLECTING, SUCCEEDED, FAILED, CANCELLED, LOST]
+    NumericalState:
+      enum: [NOT_CHECKED, PASS, FAIL, INSUFFICIENT]
+    ApplicabilityState:
+      enum: [IN_SCOPE, OUT_OF_SCOPE, UNCONFIRMED]
+    ReviewState:
+      enum: [NOT_SUBMITTED, PENDING, CHANGES_REQUESTED, ACCEPTED, REJECTED]
+    ValidityState:
+      enum: [CURRENT, STALE]
+
+    Task:
+      type: object
+      required: [task_id, project_id, current_revision, task_state, review_state, owner_id, purpose, created_at]
+      properties:
+        task_id: { type: string, description: 稳定任务 ID }
+        project_id: { type: string }
+        current_revision: { type: integer, minimum: 0 }
+        task_state: { $ref: '#/components/schemas/TaskFlowState' }
+        review_state: { $ref: '#/components/schemas/ReviewState' }
+        owner_id: { type: string }
+        purpose: { type: string, enum: [design_screening] }
+        blockers:
+          type: array
+          items: { type: object }
+          description: 阻塞不是静默跳过；缺输入/回读失败在此表达
+        created_at: { type: string, format: date-time }
+
+    TaskRevision:
+      type: object
+      required: [task_id, revision, spec, spec_sha256, source_refs, created_by, created_at]
+      properties:
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1, description: 单调递增；发布后不可原位修改 }
+        spec:
+          type: object
+          description: 完整业务输入，符合 task-spec.schema.json
+        spec_sha256: { $ref: '#/components/schemas/Sha256' }
+        source_refs:
+          type: array
+          items: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Preparation:
+      type: object
+      required: [preparation_id, task_id, revision, prepared_digest, prepared_artifacts, readback_sha256, adapter_build, software_build, differences, blockers, created_at]
+      properties:
+        preparation_id: { type: string }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        prepared_digest: { $ref: '#/components/schemas/Sha256' }
+        prepared_artifacts:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/Sha256' }
+          description: "{logical_path: artifact_sha256}，逐文件摘要"
+        readback_sha256: { $ref: '#/components/schemas/Sha256' }
+        adapter_build: { type: string }
+        software_build: { type: string }
+        differences:
+          type: array
+          items: { type: object }
+          description: 申请值/真实回读差异
+        blockers:
+          type: array
+          items: { type: object }
+        created_at: { type: string, format: date-time }
+      description: 授权后不可变。
+
+    Authorization:
+      type: object
+      required: [authorization_id, task_id, revision, preparation_id, prepared_digest, execution_budget, authorized_by, purpose, validity, created_at]
+      properties:
+        authorization_id: { type: string }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        preparation_id: { type: string }
+        prepared_digest: { $ref: '#/components/schemas/Sha256' }
+        execution_budget: { type: object }
+        authorized_by: { type: string, description: 授权人（人工会话身份） }
+        purpose: { type: string }
+        validity: { $ref: '#/components/schemas/ValidityState' }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+
+    Run:
+      type: object
+      required: [run_id, task_id, revision, variant_id, condition_id, execution_state, numerical_state, applicability_state, created_at]
+      properties:
+        run_id: { type: string }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        variant_id: { type: string }
+        condition_id: { type: string }
+        execution_state: { $ref: '#/components/schemas/ExecutionState' }
+        numerical_state: { $ref: '#/components/schemas/NumericalState' }
+        applicability_state: { $ref: '#/components/schemas/ApplicabilityState' }
+        current_attempt_id: { type: string, nullable: true }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/Event' }
+          description: 按 after_seq 增量返回
+        created_at: { type: string, format: date-time }
+
+    Attempt:
+      type: object
+      required: [attempt_id, run_id, attempt_no, state, created_at]
+      properties:
+        attempt_id: { type: string, description: 不可覆盖 }
+        run_id: { type: string }
+        attempt_no: { type: integer, minimum: 1 }
+        node_id: { type: string, nullable: true }
+        lease_id: { type: string, nullable: true }
+        fencing_token: { type: integer, nullable: true }
+        process_identity:
+          type: object
+          nullable: true
+          description: 进程身份/创建时间或外部调度 ID
+        state: { $ref: '#/components/schemas/ExecutionState' }
+        started_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Job:
+      type: object
+      required: [job_id, kind, state, row_version, created_at]
+      properties:
+        job_id: { type: string }
+        kind:
+          enum: [PREPARE, EXECUTE]
+          description: PREPARE 完成不生成工程结果，不进入已完成计算数
+        task_id: { type: string, nullable: true }
+        run_id: { type: string, nullable: true }
+        attempt_id: { type: string, nullable: true }
+        node_id: { type: string, nullable: true }
+        state: { $ref: '#/components/schemas/ExecutionState' }
+        row_version: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+
+    Lease:
+      type: object
+      required: [lease_id, job_id, node_id, fencing_token, acquired_at, expires_at]
+      properties:
+        lease_id: { type: string }
+        job_id: { type: string }
+        node_id: { type: string }
+        fencing_token: { type: integer, minimum: 1, description: 递增；Worker 只接受当前 token }
+        acquired_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+
+    Event:
+      type: object
+      required: [event_id, job_id, event_seq, kind, payload, occurred_at]
+      properties:
+        event_id: { type: string }
+        job_id: { type: string }
+        event_seq: { type: integer, minimum: 1, description: "UNIQUE(job_id,event_seq)" }
+        kind:
+          enum: [STARTING, RUNNING, HEARTBEAT, COMPLETED, FAILED, CANCELLED]
+        payload: { type: object }
+        occurred_at: { type: string, format: date-time }
+
+    Artifact:
+      type: object
+      required: [artifact_id, project_id, logical_path, length, sha256, state, created_at]
+      properties:
+        artifact_id: { type: string }
+        project_id: { type: string }
+        logical_path: { type: string }
+        length: { type: integer, minimum: 0 }
+        sha256: { $ref: '#/components/schemas/Sha256' }
+        state:
+          enum: [TEMP, COMMITTED]
+          description: 先临时上传，长度+摘要核验后原子提交
+        job_id: { type: string, nullable: true }
+        run_id: { type: string, nullable: true }
+        attempt_id: { type: string, nullable: true }
+        evidence_mode:
+          enum: [REAL, MOCK]
+          description: MOCK 绝不冒充 REAL（诚实红线）
+        created_at: { type: string, format: date-time }
+
+    Bundle:
+      type: object
+      required: [bundle_id, task_id, revision, bundle_digest, manifest, validity, created_at]
+      properties:
+        bundle_id: { type: string }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        bundle_digest: { $ref: '#/components/schemas/Sha256' }
+        manifest:
+          type: array
+          items:
+            type: object
+            required: [artifact_id, logical_path, sha256]
+            properties:
+              artifact_id: { type: string }
+              logical_path: { type: string }
+              sha256: { $ref: '#/components/schemas/Sha256' }
+          description: 冻结清单，不可原位改写
+        validity: { $ref: '#/components/schemas/ValidityState' }
+        created_at: { type: string, format: date-time }
+
+    Verification:
+      type: object
+      required: [verification_id, run_id, rule_set_sha256, conclusion, findings, source_artifact_ids, created_at]
+      properties:
+        verification_id: { type: string }
+        run_id: { type: string }
+        attempt_id: { type: string, nullable: true }
+        rule_set_sha256: { $ref: '#/components/schemas/Sha256' }
+        check_inputs: { type: object, description: 检查输入摘要 }
+        conclusion: { $ref: '#/components/schemas/NumericalState' }
+        findings:
+          type: array
+          items: { type: object }
+          description: 缺值/NaN/单位错误/来源不明均生成明确 finding
+        source_artifact_ids:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Claim:
+      type: object
+      required: [claim_id, bundle_id, metric_id, artifact_id, text, author_type, state, created_at]
+      properties:
+        claim_id: { type: string }
+        bundle_id: { type: string }
+        metric_id: { type: string }
+        artifact_id: { type: string, description: 每条定量 Claim 绑定 artifact }
+        text: { type: string }
+        author_type:
+          enum: [HUMAN, AGENT]
+          description: 模型解释只是 Claim 草稿
+        state:
+          enum: [DRAFT, CONFIRMED]
+        created_at: { type: string, format: date-time }
+
+    Review:
+      type: object
+      required: [review_id, task_id, revision, bundle_id, bundle_digest, reviewer_id, state, validity, issues, created_at]
+      properties:
+        review_id: { type: string }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        bundle_id: { type: string }
+        bundle_digest: { $ref: '#/components/schemas/Sha256' }
+        reviewer_id: { type: string }
+        state: { $ref: '#/components/schemas/ReviewState' }
+        validity: { $ref: '#/components/schemas/ValidityState' }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewIssue' }
+        created_at: { type: string, format: date-time }
+
+    ReviewIssue:
+      type: object
+      required: [issue_id, review_id, created_by, responsible, severity, description, close_criteria, status, version, created_at]
+      properties:
+        issue_id: { type: string }
+        review_id: { type: string }
+        created_by: { type: string }
+        responsible: { type: string }
+        severity: { type: string }
+        description: { type: string }
+        close_criteria: { type: string }
+        related_artifact_ids:
+          type: array
+          items: { type: string }
+        related_run_ids:
+          type: array
+          items: { type: string }
+        replies:
+          type: array
+          items:
+            type: object
+            required: [reply_id, author_id, body, created_at]
+            properties:
+              reply_id: { type: string }
+              author_id: { type: string }
+              body: { type: string }
+              evidence_artifact_ids:
+                type: array
+                items: { type: string }
+              created_at: { type: string, format: date-time }
+        status:
+          enum: [DRAFT, OPEN, CLOSED]
+          description: 模型创建的为 DRAFT；confirmIssue 人工确认转 OPEN；closeIssue 需审查人确认
+        version: { type: integer, minimum: 1 }
+        closed_by: { type: string, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Decision:
+      type: object
+      required: [decision_id, review_id, outcome, decided_by, task_id, revision, bundle_digest, purpose, decided_at]
+      properties:
+        decision_id: { type: string }
+        review_id: { type: string }
+        outcome:
+          enum: [ACCEPT, REQUEST_CHANGES, REJECT]
+          description: ACCEPT 在数值 FAIL/证据 INSUFFICIENT/范围 UNCONFIRMED/MOCK/未关闭阻塞时必须失败
+        decided_by: { type: string, description: 指定审查人；职责分离，不能自行验收 }
+        task_id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        bundle_digest: { $ref: '#/components/schemas/Sha256' }
+        purpose: { type: string }
+        limitations: { type: string, nullable: true }
+        decided_at: { type: string, format: date-time }
+      description: 已接受决定保持不可变；新输入使其对当前输入失效而非删除。
+
+    CapabilityPackage:
+      type: object
+      required: [capability_package_id, version, manifest_sha256, status, purpose]
+      properties:
+        capability_package_id: { type: string }
+        version: { type: string }
+        manifest_sha256: { $ref: '#/components/schemas/Sha256' }
+        status:
+          enum: [DRAFT, RELEASED, RETIRED]
+          description: 只有 RELEASED 且与当前软件匹配的能力可用于正式任务
+        purpose: { type: string }
+        domain_summary: { type: string, nullable: true }
+        compatibility:
+          type: object
+          nullable: true
+          description: 软件版本兼容信息（占位）

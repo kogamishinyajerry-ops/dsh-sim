@@ -1,0 +1,13 @@
+# dsh-sim-plugin — bundle patch layer
+#
+# 0.1.5-rc.2 要求：每个 profile bundle 在 package.json 声明 dsh.bundle.patch。
+# 本文件注册 sim-bridge loader entry；插件的全部运行时配置走 DSH settings
+# 命名空间 `dsh-sim`（设置卡片可改），不写死在本 patch 中。
+#
+# inject：cordis 服务装配为并行 apply，显式声明依赖可保证 settings/webServer
+# 两个服务 fiber 激活后再执行本插件（参照 dsh-web-app 中 webserver 条目的
+# inject: [webStartup] 官方写法）。缺省并行竞态下 ctx.get 会拿到 undefined。
+- insert:
+    - id: sim-bridge
+      name: 'dsh-sim-plugin'
+      inject: [settings, webServer]

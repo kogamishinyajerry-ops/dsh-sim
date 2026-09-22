@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-sim.local/contracts/task-draft.schema.json",
+  "title": "TaskDraft",
+  "description": "dsh-sim 任务草稿（定义书 §输入契约与摘要规则）。草稿允许缺少 conditions 等整项，缺失输入必须以 open_questions 显式阻塞记录，禁止补猜。准备前剔除草稿字段并强制通过完整 task-spec.schema.json。$defs 与 task-spec.schema.json 保持一致。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["purpose"],
+  "properties": {
+    "purpose": {
+      "const": "design_screening",
+      "description": "首版固定为 design_screening。"
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/variant" },
+      "description": "草稿阶段可整项缺失；缺失时必须存在对应 open_questions 项。"
+    },
+    "conditions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/condition" }
+    },
+    "execution_budget": { "$ref": "#/$defs/execution_budget" },
+    "method": { "$ref": "#/$defs/method" },
+    "open_questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/open_question" },
+      "description": "阻塞数组：每个缺失/待澄清输入一项，含字段、责任人与问题。存在未解决 open_questions 的草稿不得进入准备。"
+    }
+  },
+  "$defs": {
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "64 位小写十六进制 SHA-256。哈希仅由服务计算；客户端值以服务端重算为准。"
+    },
+    "open_question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "responsible", "question"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "description": "缺失/待澄清的字段路径（如 conditions[0].fields.inlet_pressure.reference_absolute_pressure）。"
+        },
+        "responsible": {
+          "type": "string",
+          "minLength": 1,
+          "description": "责任人（创建含缺项任务时必须列明字段和责任人，FR-01）。"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "description": "需要责任人回答的具体问题。"
+        }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["si_value", "unit", "physical_meaning", "source_ref"],
+      "properties": {
+        "si_value": {
+          "type": "number",
+          "description": "SI 规范值，必须为有限数值（canonical-json-v1 拒绝 NaN/Infinity）。"
+        },
+        "unit": { "type": "string", "minLength": 1 },
+        "physical_meaning": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "original_value": { "type": "number" },
+        "original_unit": { "type": "string" },
+        "conversion_note": { "type": "string" }
+      }
+    },
+    "pressure_quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["si_value", "unit", "physical_meaning", "source_ref", "pressure_kind", "pressure_semantics"],
+      "properties": {
+        "si_value": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1 },
+        "physical_meaning": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "original_value": { "type": "number" },
+        "original_unit": { "type": "string" },
+        "conversion_note": { "type": "string" },
+        "pressure_kind": {
+          "enum": ["absolute", "gauge"],
+          "description": "绝压/表压。表压必须携带参考绝压及来源（FR-04）。"
+        },
+        "pressure_semantics": {
+          "enum": ["total", "static"],
+          "description": "总压/静压语义；不因单位同为 Pa 而混用。"
+        },
+        "reference_absolute_pressure": {
+          "$ref": "#/$defs/quantity",
+          "description": "表压的参考绝压。pressure_kind=gauge 时必填；没有参考压力的表压输入不得进入准备。"
+        }
+      },
+      "if": {
+        "properties": { "pressure_kind": { "const": "gauge" } },
+        "required": ["pressure_kind"]
+      },
+      "then": {
+        "required": ["reference_absolute_pressure"]
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant_id", "template_artifact_id", "template_sha256", "boundary_map_sha256"],
+      "properties": {
+        "variant_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "template_artifact_id": { "type": "string", "minLength": 1 },
+        "template_sha256": { "$ref": "#/$defs/sha256_hex" },
+        "boundary_map_sha256": { "$ref": "#/$defs/sha256_hex" }
+      }
+    },
+    "condition_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role_id", "field", "quantity"],
+      "properties": {
+        "role_id": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "quantity": {
+          "oneOf": [
+            { "$ref": "#/$defs/quantity" },
+            { "$ref": "#/$defs/pressure_quantity" }
+          ]
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition_id", "fields"],
+      "properties": {
+        "condition_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/condition_field" }
+        }
+      }
+    },
+    "execution_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_concurrent", "cpu_cores", "memory_gb", "wallclock_hours", "max_attempts_total"],
+      "properties": {
+        "max_concurrent": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "cpu_cores": { "type": "integer", "minimum": 1 },
+        "memory_gb": { "type": "number", "exclusiveMinimum": 0 },
+        "wallclock_hours": { "type": "number", "exclusiveMinimum": 0 },
+        "max_attempts_total": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_package_id", "capability_package_sha256", "required_metrics", "review_scope"],
+      "properties": {
+        "capability_package_id": { "type": "string", "minLength": 1 },
+        "capability_package_sha256": { "$ref": "#/$defs/sha256_hex" },
+        "required_metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "review_scope": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

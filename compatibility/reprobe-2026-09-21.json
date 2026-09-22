@@ -1,0 +1,23 @@
+{
+ "P08": {
+  "steps": [
+   "API#1 started",
+   "task+revision+prepare queued (prepare http=202)",
+   "API#1 SIGKILL",
+   "API#2 restarted",
+   "task survives restart (state=PREPARING)",
+   "claim after restart: http=200 job=job_5f35ab57bbeb428c91b0 kind=PREPARE"
+  ],
+  "pass": true,
+  "note": "工程服务层断线重入通过：SQLite 持久队列在 SIGKILL 后保留，重启后任务可查、作业可 claim。真实 STAR 计算在断线下的存活性仍属 P05 限定（batch 进程独立于 API），完整无人值守场景需 Worker 常驻实测（后续 WP）。"
+ },
+ "P09": {
+  "steps": [
+   "AGENT authorize: http=422 code=VALIDATION",
+   "cross-project read: http=403 code=FORBIDDEN",
+   "executor decide: http=422 code=VALIDATION"
+  ],
+  "pass": false,
+  "note": "开发身份头模式下的三类越权（AGENT 授权 / 跨项目读 / 执行者自决）全部被拒。生产受信 IdP 集成仍为 TBD-08（定义书既定边界，非本轮缺口）。"
+ }
+}

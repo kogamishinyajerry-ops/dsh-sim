@@ -1,0 +1,16 @@
+{
+  "status": "DRAFT",
+  "approvals": [],
+  "note": "未经 Owner 发布不得用于正式任务",
+  "release_gate": {
+    "required_checks": [
+      "引用可解析（templates/macros/cases 登记记录完整）",
+      "模板与宏哈希核对",
+      "真实探针证据（P01-P05 等）存在",
+      "业务适用范围由 Owner 确认（domain.json 不再为 UNCONFIRMED）",
+      "独立参考结果存在（Gold Case 登记）",
+      "全部工程阈值已冻结（rules.json / metric-definitions.json 无 null/TBD）"
+    ],
+    "rule": "上述任一项不满足时拒绝 RELEASED（定义书 §能力包与最小知识体系、§不能让本次开发填的工程阈值）。能力 Owner 只能在隔离开发区审核发布，不能通过运行会话即时修改生产阈值（§权限、身份与文件安全）。"
+  }
+}

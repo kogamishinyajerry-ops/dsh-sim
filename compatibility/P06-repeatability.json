@@ -1,0 +1,26 @@
+{
+  "probe_id": "P06",
+  "name": "重复性",
+  "target": "同批准输入重复运行的差异符合专业容差",
+  "executed_at": "2026-09-20T22:10:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+  },
+  "commands": [
+    "(未执行 — 判定门缺 Owner 冻结容差)"
+  ],
+  "output_excerpts": [],
+  "missing_dependencies": [
+    "重复性专业容差 — CONVENTIONS §0.3: 工程阈值一律 null/TBD, 由 Owner 冻结(TBD-06); 无容差不判定",
+    "批准模板与批准工况(TBD-03/TBD-05)",
+    "P06 报告数值的可比口径(指标定义, metric-definitions.json)"
+  ],
+  "technical_readiness": "P05 已证明真实续算+CSV 导出可重复执行; 同输入两次运行的差异采集技术上可行, 仅差判定标准",
+  "evidence_files": [],
+  "conclusion": "NOT_RUN",
+  "unblock_conditions": [
+    "Owner 冻结重复性容差(写入口径: 残差/报告量的允许差异带)",
+    "批准模板 + 指标定义发布后, 同输入运行 2 次并按冻结容差判定"
+  ]
+}

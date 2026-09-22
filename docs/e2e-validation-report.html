@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>dsh-sim 端到端综合仿真验证报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js">
+;(function(){
+  const v44 = [{"key": "pressure_v44", "artifact_id": "art_8456296724c64e288f665c1b", "desc": "压力云图 v44（显式值域+真实FF绑定）", "sha256": "aa802ba1574572e457036b690f55f1d5a83bfa4d7d993db2b85496802667d874"}, {"key": "velocity_v44", "artifact_id": "art_43b28f0703e445a0947d94d9", "desc": "速度幅值 v44", "sha256": "21edee088599d6a3ec8c24d3f2044d6f9bf1c94ed38fdf3890bc5536cce7763c"}, {"key": "lambda2_v44", "artifact_id": "art_ddef13c06c2d4a768daeada6", "desc": "Lambda2 涡结构 v44", "sha256": "b884ef4b53d32884c98250197619390687fbc594407ac767017c5e147a6ba4d2"}, {"key": "tke_v44", "artifact_id": "art_c9338e430b434e06b9155572", "desc": "湍动能 v44", "sha256": "6ceb129e3fa4c6907abc515ef0b807cd1871c758cfa2192ab84a86d8988b7f69"}];
+  const grid = document.getElementById('scene-grid-report');
+  if (!grid) return;
+  const names = {pressure_v44:'压力云图 v44',velocity_v44:'速度幅值 v44',lambda2_v44:'Lambda2 涡结构 v44',tke_v44:'湍动能 v44'};
+  for (const s of v44) {
+    const fig = document.createElement('figure');
+    fig.style.cssText = 'margin:0;background:#fff;border:1px solid #e4e6ea;border-radius:12px;overflow:hidden';
+    const img = document.createElement('img');
+    img.src = 'http://127.0.0.1:8600/api/v1/artifacts/' + encodeURIComponent(s.artifact_id) + '/content';
+    img.style.cssText = 'width:100%;height:auto;display:block;cursor:zoom-in;background:#fafbfc';
+    img.loading = 'lazy'; img.alt = s.desc;
+    img.addEventListener('click', () => window.open(img.src, '_blank'));
+    const cap = document.createElement('figcaption');
+    cap.style.cssText = 'padding:6px 10px;font-size:11px;color:#62666b;border-top:1px solid #0000000f';
+    cap.textContent = (names[s.key]||s.key) + ' · 显式值域+真实FF绑定 · ' + s.sha256.slice(0,12) + '…';
+    fig.append(img, cap);
+    grid.append(fig);
+  }
+})();
+
+</script>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--ink:#0f1115;--sub:#62666b;--line:#e4e6ea;--blue:#4176e6;--green:#1a7f4b;--amber:#a66b00;--red:#c53d3d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:32px 24px 80px}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
+h2{font-size:19px;margin:44px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+.sub{color:var(--sub);font-size:13px}
+.badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;vertical-align:middle}
+.b-real{background:#e4f4ea;color:var(--green)}
+.b-gate{background:#fdeeee;color:var(--red)}
+.b-mock{background:#fdf3e0;color:var(--amber)}
+.b-info{background:#e7eefc;color:var(--blue)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--sub);font-weight:600;font-size:12px}
+code,.mono{font-family:Consolas,Menlo,monospace;font-size:12px}
+.big{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+@media(max-width:760px){.kpi{grid-template-columns:repeat(2,1fr)}}
+.kpi .card{margin:0;text-align:center;padding:16px 10px}
+.kv{color:var(--sub);font-size:12px;margin-top:2px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+.flow .st{padding:4px 10px;border-radius:8px;background:#eef1f6;font-size:12px;font-weight:600}
+.flow .ok{background:#e4f4ea;color:var(--green)}
+.flow .no{background:#fdeeee;color:var(--red)}
+.arrow{color:var(--sub)}
+.warn{background:#fdf6e7;border:1px solid #f0dfb2;border-radius:12px;padding:14px 18px;margin:14px 0;font-size:13px}
+canvas{max-height:260px}
+.footer{margin-top:48px;color:var(--sub);font-size:12px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body><div class="wrap">
+<h1>dsh-sim 端到端综合仿真验证报告</h1>
+<div class="sub">三个飞机设计相关任务 · 真实 STAR-CCM+ 2402 (19.02.009-R8) 求解 · 全链路 API 留痕 · 2026-09-21</div>
+
+<div class="kpi">
+  <div class="card"><div class="big">3</div><div class="kv">端到端任务（T1/T2/T3）</div></div>
+  <div class="card"><div class="big">11</div><div class="kv">闭环阶段全部打通</div></div>
+  <div class="card"><span class="badge b-real">REAL</span><div class="kv">T1/T2 真实求解器续算</div></div>
+  <div class="card"><span class="badge b-gate">ACCEPT 全部拒绝</span><div class="kv">诚实门精准触发（设计使然）</div></div>
+</div>
+
+<div class="warn"><b>阅读须知：</b>本报告中"真实"指 STAR-CCM+ 商业求解器实际执行（ccmpsuite_solve 已验证可用）。<b>未声称工程通过</b>：能力包 buffer_chamber 0.1.0 为 DRAFT（阈值 TBD-05/06 未冻结），按定义书发布门，三任务的 ACCEPT 均被服务端正确拒绝——这本身是本次验证最重要的功能证明。</div>
+
+<h2>① 任务全景</h2>
+<div class="card">
+<table>
+<tr><th>任务</th><th>主题</th><th>文献锚点</th><th>执行模式</th><th>关键真实数据</th><th>终态</th></tr>
+<tr><td><b>T1</b></td><td>NACA 2412 翼型气动收敛</td><td class="mono">Abbott &amp; von Doenhoff (1959); NACA R-460</td><td><span class="badge b-real">REAL</span></td><td>510 迭代真实残差序列，收敛至 <span class="mono">1.8e-22</span></td><td>REQUEST_CHANGES</td></tr>
+<tr><td><b>T2</b></td><td>圆柱涡街非定常特性</td><td class="mono">Williamson (1996) ARFM 28:477; Roshko (1954)</td><td><span class="badge b-real">REAL</span></td><td>5150 迭代 7 分量残差 + 5000 点监视器导出</td><td>REQUEST_CHANGES</td></tr>
+<tr><td><b>T3</b></td><td>A/B 对比可比性门</td><td class="mono">NASA CFD V&amp;V（方法论）</td><td><span class="badge b-info">真实身份 diff</span></td><td>A/B 物理方法差异真实检出</td><td>REQUEST_CHANGES</td></tr>
+</table>
+</div>
+
+<h2>② 全链路闭环（每个任务完整走通）</h2>
+<div class="card">
+<div class="flow">
+<span class="st ok">create_task</span><span class="arrow">→</span>
+<span class="st ok">revise_task</span><span class="arrow">→</span>
+<span class="st ok">prepare_task</span><span class="arrow">→</span>
+<span class="st ok">Worker PREPARE</span><span class="arrow">→</span>
+<span class="st ok">受信确认凭据</span><span class="arrow">→</span>
+<span class="st ok">authorizeRuns</span><span class="arrow">→</span>
+<span class="st ok">submitRuns</span><span class="arrow">→</span>
+<span class="st ok">buildBundle</span><span class="arrow">→</span>
+<span class="st ok">submitReview</span><span class="arrow">→</span>
+<span class="st no">ACCEPT 被拒</span><span class="arrow">→</span>
+<span class="st ok">REQUEST_CHANGES</span>
+</div>
+<div class="sub" style="margin-top:8px">11 个 API 阶段 × 3 任务全部真实 HTTP 往返，留痕于 <span class="mono">var/demo_evidence/mcp_call_log.json</span>（60+ 条事件记录）</div>
+</div>
+
+<h2>③ 安全与职责分离实战验证</h2>
+<div class="card">
+<table>
+<tr><th>攻击/误用场景</th><th>系统响应</th><th>结果</th></tr>
+<tr><td>AGENT 身份直接调 authorizeRuns（3 任务各 1 次）</td><td class="mono">403 FORBIDDEN</td><td><span class="badge b-gate">全部拒绝</span></td></tr>
+<tr><td>伪造 confirmation_id 授权</td><td class="mono">403 人工确认凭据无效/已消费/已过期/绑定不匹配</td><td><span class="badge b-gate">拒绝</span></td></tr>
+<tr><td>准备未完成时抢跑授权</td><td class="mono">503 BLOCKED 准备未完成或存在未清除差异</td><td><span class="badge b-gate">拒绝</span></td></tr>
+<tr><td>存在未关闭问题时 ACCEPT</td><td class="mono">503 BLOCKED ACCEPT 必须失败（列出 open_issue_ids）</td><td><span class="badge b-gate">3/3 拒绝</span></td></tr>
+<tr><td>AGENT 创建审查问题</td><td>允许但强制 DRAFT，REVIEWER 确认后才 OPEN</td><td><span class="badge b-info">职责分离生效</span></td></tr>
+</table>
+</div>
+
+<h2>④ T1 · NACA 2412 翼型 — 真实残差收敛</h2>
+<div class="grid">
+<div class="card"><b>收敛曲线（对数轴）</b><canvas id="c1"></canvas>
+<div class="sub">Simcenter STAR-CCM+ 2402 真实续算：500→510 iter，四方程残差全部收敛至 1e-22 量级（Steady · Segregated Flow · Laminar）</div></div>
+<div class="card">
+<b>文献锚点与限制</b>
+<table>
+<tr><th>项</th><th>值</th></tr>
+<tr><td>物理模型（真实回读）</td><td>Steady · Segregated Flow · Laminar · Constant Density</td></tr>
+<tr><td>文献参考</td><td class="mono">Abbott &amp; von Doenhoff, Theory of Wing Sections (1959)</td></tr>
+<tr><td>Cl/Cd 定量对齐</td><td><span class="badge b-mock">UNCONFIRMED</span> 参考压力/边界映射未冻结（TBD-05/06）——<b>不声称</b>与文献数值一致</td></tr>
+</table>
+</div>
+</div>
+
+<h2>⑤ T2 · 圆柱涡街（Williamson 锚点）— 真实非定常数据</h2>
+<div class="grid">
+<div class="card"><b>七分量残差（对数轴）</b><canvas id="c2"></canvas>
+<div class="sub">Implicit Unsteady · SST k-omega · 真实续算 30 步（5150 总迭代）激活报告监视器</div></div>
+<div class="card">
+<b>监视器与限制</b>
+<table>
+<tr><th>项</th><th>值</th></tr>
+<tr><td>导出监视器</td><td>Fx/Fy/SP + 残差 + Energy/Tke/Sdr（5000 点真实序列）</td></tr>
+<tr><td>文献参考</td><td class="mono">Williamson (1996): St≈0.19–0.21 (subcritical Re)</td></tr>
+<tr><td>St 数值对比</td><td><span class="badge b-mock">UNCONFIRMED</span> 物理时间步 dt 未随模板登记——迭代域谱峰不能直接换算 St，<b>不编造数值</b></td></tr>
+</table>
+</div>
+</div>
+
+
+<h2>⑤+ 云图实况（真实 STAR-CCM+ batch 渲染 · 哈希可追溯）</h2>
+<div class="warn"><b>说明：</b>以下 6 张图由 <span class="mono">starccm_cli.py viz-stride</span> 对真实求解结果
+（<span class="mono">cyl_vortex_v161R_v26_solved.sim</span>，5150 iter）batch 渲染生成，
+经 dsh_sim 正式 artifact API（register → PUT content → SHA-256 校验 → COMMITTED）入库、随证据 Bundle 冻结。
+执行台与审查台通过 <span class="mono">/artifacts/{id}/content</span> 受控出图——同事在 DSH 里打开任务即可看到，无需另装软件。</div>
+<div class="grid" id="scene-grid-report"></div>
+<script>
+(function(){
+  const scenes = [{"key": "pressure_contour", "artifact_id": "art_d91dd770ec9f4ef0816280a5", "desc": "压力云图"}, {"key": "velocity_stream", "artifact_id": "art_633f74212b59406994ed7f35", "desc": "流线可视化"}, {"key": "velocity_lic", "artifact_id": "art_0241c29402e846fd92f8033a", "desc": "LIC 纹理流场"}, {"key": "velocity_vector", "artifact_id": "art_308a35a8e67f46759b37d952", "desc": "速度矢量场"}, {"key": "density_contour", "artifact_id": "art_ff1e592a69084d1a8060617f", "desc": "密度云图"}, {"key": "temperature_contour", "artifact_id": "art_5919bff5120f47408ec94ef6", "desc": "温度云图"}];
+  const grid = document.getElementById('scene-grid-report');
+  const names = {pressure:'压力云图',stream:'流线可视化',lic:'LIC 纹理流场',vector:'速度矢量场',density:'密度云图',temperature:'温度云图'};
+  for (const s of scenes) {
+    const fig = document.createElement('figure');
+    fig.style.cssText = 'margin:0;background:#fff;border:1px solid #e4e6ea;border-radius:12px;overflow:hidden';
+    const img = document.createElement('img');
+    img.src = 'http://127.0.0.1:8600/api/v1/artifacts/' + encodeURIComponent(s.artifact_id) + '/content';
+    img.style.cssText = 'width:100%;height:auto;display:block;cursor:zoom-in;background:#fafbfc';
+    img.loading = 'lazy';
+    img.alt = s.desc;
+    img.addEventListener('click', () => window.open(img.src, '_blank'));
+    const cap = document.createElement('figcaption');
+    cap.style.cssText = 'padding:6px 10px;font-size:11px;color:#62666b;border-top:1px solid #0000000f';
+    cap.textContent = (names[s.key] || s.key) + ' · ' + s.sha256.slice(0, 12) + '…';
+    fig.append(img, cap);
+    grid.append(fig);
+  }
+})();
+</script>
+
+<h2>⑥ T3 · A/B 对比可比性门 — 拒绝错误的"改进幅度"</h2>
+<div class="card">
+<table>
+<tr><th>维度</th><th>A（NACA2412）</th><th>B（cyl vortex）</th><th>一致性</th></tr>
+<tr><td>时间制式</td><td>Steady</td><td>Implicit Unsteady</td><td><span class="badge b-gate">不一致</span></td></tr>
+<tr><td>湍流模型</td><td>Laminar</td><td>SST k-omega</td><td><span class="badge b-gate">不一致</span></td></tr>
+<tr><td>流动模型</td><td>Segregated Flow</td><td>Segregated Flow</td><td><span class="badge b-real">一致</span></td></tr>
+</table>
+<div class="sub" style="margin-top:6px">定义书 §审查动作："定义不一致则禁止给出改进幅度"。dsh_sim 可比性门按此拒绝数值对比，仅允许身份追溯（<span class="mono">t3_ab_identity_diff.json</span> 为真实 sim-summary diff 证据）。<b>这正是防住"拿苹果和橘子比出提升百分比"这类事故的机制证明。</b></div>
+</div>
+
+<h2>⑦ 证据链抽查（审查人视角）</h2>
+<div class="card">
+<table>
+<tr><th>任务</th><th>prepared_digest</th><th>bundle_digest</th><th>review</th><th>issue</th><th>决定</th></tr>
+<tr><td>T1</td><td class="mono" id="d-t1p"></td><td class="mono" id="d-t1b"></td><td class="mono" id="d-t1r"></td><td class="mono" id="d-t1i"></td><td><span class="badge b-info">REQUEST_CHANGES</span></td></tr>
+<tr><td>T2</td><td class="mono" id="d-t2p"></td><td class="mono" id="d-t2b"></td><td class="mono" id="d-t2r"></td><td class="mono" id="d-t2i"></td><td><span class="badge b-info">REQUEST_CHANGES</span></td></tr>
+<tr><td>T3</td><td class="mono" id="d-t3p"></td><td class="mono" id="d-t3b"></td><td class="mono" id="d-t3r"></td><td class="mono" id="d-t3i"></td><td><span class="badge b-info">REQUEST_CHANGES</span></td></tr>
+</table>
+<div class="sub">每个摘要均可从原始 artifact 独立复算（canonical-json-v1 + SHA-256）；审查人无需向执行人另索文件（FR-20 达成路径演示）。</div>
+</div>
+
+<h2>⑧ 本次验证证明了什么 / 没证明什么</h2>
+<div class="grid">
+<div class="card" style="border-top:3px solid var(--green)"><b>已证明（有真实证据）</b>
+<table>
+<tr><td>✓</td><td>STAR-CCM+ 2402 真实续算链路（license ccmpsuite_solve 可用）</td></tr>
+<tr><td>✓</td><td>11 阶段闭环 API 全部真实往返 + 幂等 + 留痕</td></tr>
+<tr><td>✓</td><td>AGENT 永远拿不到授权/接受权（多次攻击全部被拒）</td></tr>
+<tr><td>✓</td><td>ACCEPT 门在有未关闭问题/UNCONFIRMED 时必败</td></tr>
+<tr><td>✓</td><td>A/B 可比性检查拒绝口径不一致的数值对比</td></tr>
+<tr><td>✓</td><td>真实监视器/残差序列导出（5000 点级）</td></tr>
+<tr><td>✓</td><td>6 张真实 CFD 云图经 artifact API 入库+Bundle 冻结+面板内联展示</td></tr>
+</table></div>
+<div class="card" style="border-top:3px solid var(--amber)"><b>未证明（诚实边界）</b>
+<table>
+<tr><td>—</td><td>Cl/Cd 与 Abbott 表定量对齐（需 Owner 冻结参考压力）</td></tr>
+<tr><td>—</td><td>Strouhal 数与 Williamson 范围对比（需物理 dt 登记）</td></tr>
+<tr><td>—</td><td>工程方法正确性（本版无 RELEASED 能力包）</td></tr>
+<tr><td>—</td><td>多人权限真实隔离（开发身份头模式）</td></tr>
+<tr><td>—</td><td>新几何自动建模（R0 明确排除）</td></tr>
+</table></div>
+</div>
+
+<div class="footer">
+数据来源：dsh-sim/var/demo_evidence/（真实 STAR-CCM+ 输出 + API 调用日志 + 哈希链）·
+求解器：Simcenter STAR-CCM+ 2402 Build 19.02.009-R8 ·
+工程服务：dsh-sim 0.1.0 @ 127.0.0.1:8600 ·
+报告生成：2026-09-21
+</div>
+</div>
+
+<script>
+const D = {"t1": {"iterations_total": 510, "residuals": {"Continuity": [0.03467294, 0.1573839, 0.04358824, 0.01513558, 0.01025571, 0.005271978, 0.002718683, 0.00181304, 0.00128237, 0.0008110183, 0.0006297169, 0.0003940919, 0.0003141238, 0.0002062, 0.0001382909, 9.851054e-05, 7.16574e-05, 4.049104e-05, 2.530535e-05, 1.4362e-05, 6.259087e-06, 2.385722e-06, 8.597907e-07, 1.901827e-07, 2.674686e-08, 4.610128e-09, 7.438454e-10, 1.408185e-10, 3.090013e-11, 8.281608e-12, 2.120652e-12, 5.583415e-13, 1.563067e-13, 4.161499e-14, 1.073494e-14, 2.639639e-15, 6.827628e-16, 1.886012e-16, 5.412499e-17, 1.496553e-17, 4.029462e-18, 1.088787e-18, 3.172594e-19, 8.90779e-20, 1.704245e-20, 8.294067e-21, 6.305472e-21, 4.46775e-21, 4.866559e-21, 5.036091e-21, 2.79605e-21, 1.885068e-21, 7.436516e-22, 6.648072e-22, 7.21942e-22, 8.546179e-22, 8.106559e-22, 1.029148e-21, 9.321663e-22, 1.576663e-22, 1.670613e-22, 2.578626e-22, 3.902702e-22, 5.228787e-22], "X-momentum": [0.0001994496, 0.09088297, 0.01730826, 0.00239553, 0.001036826, 0.0003077757, 0.0001451186, 6.776656e-05, 2.610075e-05, 1.352169e-05, 8.069389e-06, 4.091789e-06, 2.436647e-06, 7.16449e-07, 3.142725e-07, 1.736723e-07, 6.520817e-08, 2.172434e-08, 9.01192e-09, 2.251092e-09, 5.227836e-10, 1.430811e-10, 4.193272e-11, 1.179703e-11, 3.174706e-12, 8.198563e-13, 2.106326e-13, 5.496035e-14, 1.454972e-14, 3.903827e-15, 1.057527e-15, 2.887534e-16, 7.932488e-17, 2.189984e-17, 6.070534e-18, 1.688831e-18, 4.713954e-19, 1.319366e-19, 3.701053e-20, 1.040231e-20, 2.92871e-21, 8.258773e-22, 2.331952e-22, 6.592957e-23, 1.866679e-23, 5.281391e-24, 1.493042e-24, 4.239368e-25, 1.184364e-25, 3.407951e-26, 5.336777e-26, 6.312502e-26, 6.666826e-26, 1.085034e-25, 9.141811e-26, 1.216186e-25, 9.047349e-26, 1.437206e-25, 1.031196e-25, 2.331478e-25, 2.512322e-25, 1.505509e-25, 1.496131e-25, 1.49487e-25], "Y-momentum": [0.0001205198, 0.1311627, 0.036029, 0.008553965, 0.006166996, 0.00361016, 0.001080601, 0.000517555, 0.0002281518, 0.0001041003, 5.622321e-05, 2.972637e-05, 1.539909e-05, 6.334192e-06, 3.321167e-06, 1.510579e-06, 7.438384e-07, 2.369792e-07, 8.48881e-08, 2.167437e-08, 6.922586e-09, 2.232902e-09, 6.396053e-10, 1.598015e-10, 4.241794e-11, 1.110409e-11, 2.845334e-12, 7.283473e-13, 1.872137e-13, 4.831605e-14, 1.251504e-14, 3.252857e-15, 8.480164e-16, 2.217076e-16, 5.812787e-17, 1.528942e-17, 4.035458e-18, 1.068762e-18, 2.840783e-19, 7.578602e-20, 2.029424e-20, 5.454928e-21, 1.472363e-21, 3.990075e-22, 1.084804e-22, 2.975894e-23, 8.287565e-24, 2.270919e-24, 7.604953e-25, 5.604634e-25, 2.593195e-24, 3.08675e-24, 2.771244e-24, 4.207893e-24, 3.059575e-24, 3.830778e-24, 2.591956e-24, 3.926798e-24, 2.633961e-24, 5.440375e-24, 5.470997e-24, 3.076286e-24, 2.821526e-24, 2.719928e-24], "Z-momentum": [3.123167e-18, 0.1316078, 0.02770361, 0.009213326, 0.005280065, 0.003043186, 0.001164207, 0.0005469594, 0.0002740343, 0.0001068232, 5.521096e-05, 3.015928e-05, 1.52819e-05, 7.007036e-06, 2.961568e-06, 1.622568e-06, 7.567036e-07, 2.494333e-07, 9.180929e-08, 2.651783e-08, 7.149101e-09, 1.982244e-09, 5.793334e-10, 1.287003e-10, 3.099398e-11, 8.160133e-12, 2.135349e-12, 5.555718e-13, 1.442085e-13, 3.737786e-14, 9.683715e-15, 2.507556e-15, 6.489697e-16, 1.678914e-16, 4.341285e-17, 1.122635e-17, 2.905058e-18, 7.520998e-19, 1.947925e-19, 5.046687e-20, 1.307878e-20, 3.390172e-21, 8.791535e-22, 2.280779e-22, 5.917995e-23, 1.537028e-23, 4.024433e-24, 1.040231e-24, 3.101554e-25, 2.054867e-25, 9.243295e-25, 9.758519e-25, 7.950819e-25, 1.239049e-24, 9.550007e-25, 1.229734e-24, 8.737426e-25, 1.36217e-24, 9.603104e-25, 2.105107e-24, 2.231566e-24, 1.322507e-24, 1.303459e-24, 1.291862e-24]}}, "t2": {"iterations_total": 5150, "residuals": {"Continuity": [0.0, 0.15896, 0.5376088, 0.6520122, 0.2105084, 1.028747, 0.1742162, 0.2360342, 0.2663556, 0.2729631, 0.1841559, 0.06421192, 0.0666271, 0.1471042, 0.06314814, 0.3606622, 0.03265132, 0.1323306, 0.4459181, 0.3757607, 0.07550553, 0.03750718, 0.2276899, 0.06125121, 0.1116533, 0.1464673, 0.05455721, 0.03504267, 0.1163443, 0.07439038, 0.9519909, 0.04108772, 0.1842335, 0.4675997, 0.4791322, 0.01713301, 0.6496716, 0.09026457, 0.07457855, 0.9158033, 0.04656333, 0.1104499, 0.03204397, 0.0921389, 0.01221228, 0.0156697, 0.009844575, 0.008133611, 0.005553913, 0.006403633, 1.13764, 0.01812802, 0.01966176, 0.004687587, 0.00289991, 0.002321724, 0.002879847, 0.00981807, 0.001722063, 0.0002177313, 1.294777e-05, 1.175201e-05, 2.244677e-05, 1.045881e-05, 1.110365e-05, 1.269423e-05, 1.161446e-05, 2.173969e-05, 1.038708e-05, 1.10463e-05, 1.260533e-05, 1.099418e-05, 1.038832e-05, 1.103849e-05, 1.256267e-05, 1.14324e-05, 2.078008e-05, 1.03437e-05, 1.136793e-05, 1.098944e-05, 2.033374e-05], "X-momentum": [0.0, 0.4542502, 0.9363935, 1.106626, 0.3361761, 0.2711807, 0.4607283, 0.4610922, 0.4328632, 0.4255424, 0.5300348, 0.1924159, 0.1618616, 0.3608136, 0.1093204, 0.8471882, 0.1351958, 0.06826238, 1.274598, 0.2691788, 0.2050073, 0.1056225, 0.4452391, 0.3592242, 0.2297026, 0.3174672, 0.1383572, 0.3161707, 0.1097023, 0.2643447, 0.4397684, 0.1287706, 0.6806697, 0.7723828, 1.235376, 0.1629848, 2.182208, 0.2584739, 0.03115212, 0.5411701, 0.1221354, 0.2756274, 0.1508216, 0.09845758, 0.02181253, 0.02891917, 0.02760396, 0.03692987, 0.01465239, 0.01137929, 0.005849237, 0.04338756, 0.01969116, 0.01214998, 0.008377056, 0.008888354, 0.0229946, 0.01283098, 0.007131624, 0.0001538815, 1.455772e-05, 6.194714e-05, 0.0003280155, 5.512723e-06, 8.936863e-06, 1.383683e-05, 6.06529e-05, 0.0003223479, 5.367801e-06, 8.693932e-06, 1.327806e-05, 5.948543e-05, 5.364501e-06, 8.557007e-06, 1.333527e-05, 5.851742e-05, 0.0003127247, 5.278807e-06, 5.788465e-05, 8.283139e-06, 0.0003089066], "Y-momentum": [0.0, 0.1832519, 0.4477617, 0.6177714, 0.08573426, 0.1315614, 0.2551024, 0.3008979, 0.2700459, 0.1279565, 0.2140971, 0.08103609, 0.101008, 0.2026971, 0.04010271, 0.6424299, 0.02700482, 0.04078258, 0.4857503, 0.1496443, 0.09600891, 0.03653125, 0.2625224, 0.1665761, 0.1422964, 0.1846107, 0.06564989, 0.1382308, 0.06143341, 0.0898732, 0.3376645, 0.04573014, 0.1664218, 0.3084328, 0.4538817, 0.06149784, 0.5295964, 0.1021279, 0.009380395, 0.2662073, 0.05307502, 0.13007, 0.07463308, 0.06113461, 0.01042683, 0.01542786, 0.007562621, 0.005454428, 0.003709815, 0.002325282, 0.003513822, 0.01127219, 0.006456763, 0.003691998, 0.00144632, 0.0007928565, 0.002221524, 0.001214377, 0.0006399798, 0.0001527084, 1.051969e-05, 4.34801e-05, 0.0002391525, 3.813796e-06, 6.239293e-06, 9.852592e-06, 4.268225e-05, 0.0002352712, 3.712102e-06, 6.121927e-06, 9.479375e-06, 4.200071e-05, 3.73786e-06, 6.000859e-06, 9.512406e-06, 4.130115e-05, 0.0002283953, 3.683064e-06, 4.091219e-05, 5.813922e-06, 0.0002256516], "Z-momentum": [0.0, 0.2256811, 2.931983, 0.8861767, 0.2622681, 0.2120507, 0.3856463, 0.4353541, 0.531569, 0.2601272, 0.667265, 0.1643957, 0.1601715, 0.3711322, 0.1065129, 0.7329161, 0.143717, 0.03895288, 3.102702, 0.5230997, 0.2177327, 0.06981274, 0.696036, 0.334164, 0.3711115, 0.4460668, 0.08490519, 0.2995679, 0.1245876, 0.2352553, 0.8526086, 0.1207828, 1.163948, 1.652491, 0.4473409, 0.140644, 1.284662, 0.2106458, 0.03770003, 0.411279, 0.1194384, 0.375893, 0.1355457, 0.0947252, 0.03667172, 0.04151791, 0.02473506, 0.02985784, 0.01811657, 0.0127317, 0.004938726, 0.03192529, 0.01876471, 0.01248285, 0.006379519, 0.006524957, 0.01948443, 0.01114063, 0.006095943, 9.424927e-05, 7.670596e-06, 3.227101e-05, 0.0001710731, 3.747215e-06, 5.727638e-06, 7.13763e-06, 3.169508e-05, 0.0001687649, 3.645514e-06, 5.578372e-06, 6.862228e-06, 3.113062e-05, 3.657749e-06, 5.492578e-06, 6.921417e-06, 3.075123e-05, 0.0001646798, 3.602141e-06, 3.046691e-05, 5.317693e-06, 0.0001630434], "Energy": [0.0, 0.2673904, 0.2583432, 0.2643533, 0.2908491, 0.2483922, 0.2364077, 0.2404927, 0.2304752, 0.2586532, 0.2309895, 0.2206603, 0.2167034, 0.2164389, 0.2297496, 0.2213175, 0.1975442, 0.192973, 0.2092669, 0.2102412, 0.1785338, 0.1751923, 0.164481, 0.1663347, 0.1619542, 0.1587703, 0.1538915, 0.1674915, 0.1626023, 0.1438027, 0.156417, 0.1358223, 0.1340766, 0.140398, 0.2310719, 0.1398923, 0.2114506, 0.1245394, 0.1254304, 0.1378988, 0.1408637, 0.1152819, 0.1044448, 0.1096872, 0.1066175, 0.1035382, 0.1006772, 0.09822574, 0.09538318, 0.09278285, 0.0957277, 0.08795692, 0.08563579, 0.08299256, 0.08073592, 0.07846918, 0.07644677, 0.0743199, 0.07204269, 0.07008953, 0.0680716, 0.06619856, 0.064253, 0.06235403, 0.06050553, 0.05872011, 0.05706322, 0.05534383, 0.05366648, 0.05203472, 0.05045956, 0.04899858, 0.04748412, 0.04600989, 0.0445875, 0.04326907, 0.04190262, 0.04057132, 0.03937045, 0.03811091, 0.0369694], "Tke": [1.0, 0.03032572, 0.04897039, 0.1722147, 0.7154498, 0.002057462, 0.007761349, 0.03189943, 0.1353046, 0.5878365, 0.0014362, 0.006002356, 0.02571661, 0.1126263, 0.5027996, 0.001135197, 0.004905742, 0.02164125, 0.097195, 0.4431516, 0.0009387943, 0.004169087, 0.01882725, 0.08621924, 0.0008284341, 0.00374504, 0.01716338, 0.07954095, 0.3719294, 0.0007271259, 0.003345415, 0.01555109, 0.07288762, 0.34388, 0.0006529058, 0.003043437, 0.01429511, 0.06755546, 0.3208238, 0.0005961572, 0.002805637, 0.01327891, 0.06313688, 0.301322, 0.0005510097, 0.002611516, 0.01243046, 0.0593762, 0.000520874, 0.002479402, 0.01184344, 0.05673813, 0.2724853, 0.0004884046, 0.002334835, 0.0111927, 0.05378187, 0.258951, 0.0004604373, 0.00220858, 0.01061779, 0.05114478, 0.2467794, 0.0004359167, 0.002096681, 0.0101036, 0.04876807, 0.2357374, 0.0004141202, 0.001996358, 0.009639251, 0.04660828, 0.0003983537, 0.001923332, 0.009299406, 0.04502011, 0.2181991, 0.0003802545, 0.04390446, 0.001824083, 0.2113436], "Sdr": [1.0, 3.628294e-05, 0.0001781887, 0.0008770464, 0.004323118, 6.784104e-06, 3.332909e-05, 0.0001640822, 0.0008089926, 0.003993243, 6.285695e-06, 3.093594e-05, 0.0001524852, 0.0007525132, 0.003717417, 5.865578e-06, 2.889334e-05, 0.0001425048, 0.0007036063, 0.003477326, 5.496702e-06, 2.708694e-05, 0.0001336329, 0.0006599513, 5.228942e-06, 2.577048e-05, 0.0001271475, 0.0006279571, 0.003104245, 4.917676e-06, 2.423625e-05, 0.0001195739, 0.0005905292, 0.002919123, 4.628162e-06, 2.280659e-05, 0.0001125058, 0.0005555533, 0.002745925, 4.356301e-06, 2.146253e-05, 0.0001058544, 0.0005226125, 0.002582689, 4.099414e-06, 2.019588e-05, 9.959071e-05, 0.000491623, 3.907001e-06, 1.924034e-05, 9.485616e-05, 0.0004681501, 0.002312885, 3.674973e-06, 1.809135e-05, 8.91627e-05, 0.0004399231, 0.002172886, 3.45363e-06, 1.699449e-05, 8.372654e-05, 0.000412968, 0.002039181, 3.241975e-06, 1.594683e-05, 7.853577e-05, 0.0003872406, 0.001911633, 3.040288e-06, 1.49481e-05, 7.358826e-05, 0.0003627244, 2.886439e-06, 1.418633e-05, 6.981519e-05, 0.0003440321, 0.001697507, 2.701795e-06, 0.0003305822, 1.31059e-05, 0.001610256]}}, "t3": {"A_naca2412": {"time": "Steady", "turb": "Laminar", "flow": "Segregated Flow", "mesh": {"regions": 1, "boundaries": 1, "part_surfaces": 2, "interfaces": 0}, "monitors": {"residual": 4, "report": 0, "physical_time": 1, "iteration": 1}, "reports": 0}, "B_cyl_vortex": {"time": "Implicit Unsteady", "turb": "SST k-omega", "flow": "Segregated Flow", "mesh": {"regions": 1, "boundaries": 9, "part_surfaces": 14, "interfaces": 0}, "monitors": {"residual": 7, "report": 3, "physical_time": 1, "iteration": 1}, "reports": 12}, "diff": {"time": {"A": "Steady", "B": "Implicit Unsteady", "equal": false}, "turb": {"A": "Laminar", "B": "SST k-omega", "equal": false}, "flow": {"A": "Segregated Flow", "B": "Segregated Flow", "equal": true}}}, "chain": {"T1": {"task_id": null, "revision": 1, "prepared_digest": "202c7d5182751cee", "bundle_id": "bundle_9f4ed9691ad043cd93d26b5f", "bundle_digest": "d082cee20456f198", "review_id": "rev_a82692c6cd544027a0e38a72", "issue_id": "issue_3403c82a919a49f09b893f39", "decision": "REQUEST_CHANGES"}, "T2": {"task_id": null, "revision": 1, "prepared_digest": "fa0d38c0355a4ca3", "bundle_id": "bundle_afa900f94b1742c3a22e2074", "bundle_digest": "1b999a228195b9e6", "review_id": "rev_7d50b778da2b424fbc113d11", "issue_id": "issue_b2faa530175b4326904185eb", "decision": "REQUEST_CHANGES"}, "T3": {"task_id": null, "revision": 1, "prepared_digest": "87f35f00041997aa", "bundle_id": "bundle_55fea1009a014b728d89f6db", "bundle_digest": "7bbba4174a162e14", "review_id": "rev_a643748bd4af41b5baf76183", "issue_id": "issue_3e70c20acd7a42b3a1bdf029", "decision": "REQUEST_CHANGES"}}};
+for (const t of ['t1','t2','t3']) {
+  const c = D.chain[t];
+  document.getElementById('d-'+t+'p').textContent = c.prepared_digest+'…';
+  document.getElementById('d-'+t+'b').textContent = c.bundle_digest+'…';
+  document.getElementById('d-'+t+'r').textContent = c.review_id ? c.review_id.slice(0,16)+'…' : '-';
+  document.getElementById('d-'+t+'i').textContent = c.issue_id ? c.issue_id.slice(0,16)+'…' : '-';
+}
+const COLORS = {Continuity:'#4176e6','X-momentum':'#1a7f4b','Y-momentum':'#a66b00','Z-momentum':'#c53d3d',Energy:'#7a5fd0',Tke:'#0f8b8b',Sdr:'#8b6f0f'};
+function lineChart(id, series){
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  const ds = Object.entries(series).map(([k,v])=>({
+    label:k, data:v.map(x=>Math.log10(Math.max(x,1e-30))), borderColor:COLORS[k]||'#888',
+    backgroundColor:'transparent', borderWidth:1.6, pointRadius:0, tension:.25
+  }));
+  new Chart(ctx,{type:'line',data:{labels:series[Object.keys(series)[0]].map((_,i)=>i),datasets:ds},
+    options:{animation:false,plugins:{legend:{labels:{boxWidth:10,font:{size:10}}}},
+      scales:{y:{title:{display:true,text:'log10(residual)'},ticks:{font:{size:9}}},
+              x:{title:{display:true,text:'迭代（降采样序号）'},ticks:{font:{size:9}}}}}});
+}
+lineChart('c1', D.t1.residuals);
+lineChart('c2', D.t2.residuals);
+</script>
+</body></html>

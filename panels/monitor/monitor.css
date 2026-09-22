@@ -1,0 +1,116 @@
+/* dsh-sim · panels/monitor/monitor.css — 监控台局部样式（复用 shared/styles.css 令牌与组件） */
+
+.topbar-note { color: var(--fg-secondary); font-size: 12.5px; }
+
+/* MOCK 水印（与 executor 一致：斜体，琥珀色） */
+.mock-watermark {
+  font-style: italic;
+  color: var(--mock-fg);
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: 1px dashed var(--mock-fg);
+  border-radius: 4px;
+  padding: 0 8px;
+}
+
+/* 单列布局（监控台无侧栏） */
+.layout-single { grid-template-columns: 1fr; }
+
+.poll-line { color: var(--fg-secondary); font-size: 12px; margin: 0 0 10px; }
+.summary-line { font-size: 13px; margin: 2px 0 10px; }
+.empty-line { color: var(--fg-secondary); font-style: italic; padding: 18px 0; text-align: center; }
+
+/* ---------- Run 卡片 ---------- */
+.run-card {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--bg-base);
+}
+.run-card-active   { border-left-color: var(--primary); }
+.run-card-failed   { border-left-color: var(--err);  border-color: var(--err); }
+.run-card-cancelled{ border-left-color: var(--muted); opacity: .85; }
+
+.run-head {
+  display: flex; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; align-items: baseline;
+}
+.run-head-left  { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.run-head-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.run-short-id {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  background: #00000008; padding: 1px 6px; border-radius: 4px;
+  cursor: copy; user-select: text;
+}
+.run-vc { color: var(--fg-secondary); font-size: 12.5px; }
+
+.stage-chip {
+  font-size: 12px; border: 1px solid var(--border);
+  border-radius: 10px; padding: 1px 8px; color: var(--fg-primary);
+  background: #00000005; user-select: text;
+}
+.hb-chip { font-size: 12px; color: var(--fg-secondary); user-select: text; }
+.hb-chip.hb-lost {
+  color: var(--err); font-weight: 700;
+  background: repeating-linear-gradient(45deg, #c53d3d15, #c53d3d15 5px, transparent 5px, transparent 10px);
+  border: 1px solid var(--err); border-radius: 10px; padding: 1px 8px;
+}
+
+/* ---------- 残差迷你图 ---------- */
+.spark-box { margin: 10px 0; }
+.spark-title { font-size: 12px; margin: 0 0 4px; }
+.spark-svg {
+  display: block;
+  width: 100%;
+  height: 64px;            /* 容器 100% × 64px，viewBox 自适应 */
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.spark-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.spark-dot  { fill: var(--primary); }
+.spark-grid { stroke: #00000012; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  fill: var(--fg-secondary);
+}
+.spark-empty { font-size: 12.5px; }
+
+/* ---------- 事件时间线 ---------- */
+.event-list { font-size: 12.5px; color: var(--fg-secondary); padding-left: 18px; margin: 6px 0; }
+.event-row  { margin-bottom: 2px; user-select: text; }
+.event-row code { user-select: text; }
+
+.log-line { font-size: 12.5px; color: var(--fg-secondary); margin: 6px 0 0; user-select: text; }
+
+/* ---------- 逐任务读取失败提示 ---------- */
+.task-errors {
+  border: 1px solid var(--warn); border-radius: var(--radius);
+  padding: 8px 12px; margin: 10px 0;
+  background: repeating-linear-gradient(45deg, #a66b0008, #a66b0008 8px, transparent 8px, transparent 16px);
+}
+.task-error-list { font-size: 12.5px; padding-left: 18px; margin: 4px 0 0; user-select: text; }
+
+/* ---------- 最近完成（空态折叠区） ---------- */
+.finished-details { margin-top: 12px; }
+.finished-details summary { cursor: pointer; color: var(--fg-secondary); font-size: 13px; }
+.finished-list { font-size: 12.5px; padding-left: 18px; margin: 6px 0; user-select: text; }
+.finished-list li { margin-bottom: 3px; }
+
+/* ---------- 打印：保留 run id 与摘要 ---------- */
+@media print {
+  .poll-line, .topbar .btn, .no-print { display: none !important; }
+  .run-card { break-inside: avoid; border-color: #999; }
+  .run-short-id::after { content: " (" attr(title) ")"; font-size: 10px; color: #444; }
+  .spark-svg { border-color: #999; }
+  .hb-chip.hb-lost { background: none; border: 1px solid #666; }
+  .finished-details summary { color: #000; }
+}

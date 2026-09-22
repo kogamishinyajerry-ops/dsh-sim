@@ -1,0 +1,76 @@
+/* dsh-sim · panels/executor/executor.css — 执行台局部样式 */
+
+.topbar-note { color: var(--fg-secondary); font-size: 12.5px; }
+
+/* MOCK 水印（斜体，琥珀色） */
+.mock-watermark {
+  font-style: italic;
+  color: var(--mock-fg);
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: 1px dashed var(--mock-fg);
+  border-radius: 4px;
+  padding: 0 8px;
+}
+
+/* 任务列表 */
+.filter-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.filter-btn {
+  font: inherit; font-size: 12.5px; padding: 3px 10px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: transparent; color: var(--fg-secondary); cursor: pointer;
+}
+.filter-btn.active { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.task-item {
+  display: block; width: 100%; text-align: left; font: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-base); padding: 8px 10px; margin-bottom: 6px; cursor: pointer;
+}
+.task-item:hover { border-color: var(--primary); }
+.task-item.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.task-item-id { font-family: var(--mono); font-size: 12.5px; }
+.task-item-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; color: var(--fg-secondary); font-size: 12px; }
+.manual-load { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 8px; }
+
+/* 主任务卡 */
+.task-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.task-title { font-size: 15px; }
+.task-sub { color: var(--fg-secondary); font-size: 12.5px; }
+.task-head-badges { display: flex; gap: 6px; align-items: flex-start; }
+.fact-grid {
+  display: grid; grid-template-columns: 110px 1fr; gap: 2px 12px;
+  margin: 10px 0; font-size: 13px;
+}
+.fact-grid dt { color: var(--fg-secondary); }
+.fact-grid dd { margin: 0; }
+.objective { background: #00000005; border-radius: var(--radius); padding: 6px 10px; }
+
+/* 矩阵 */
+.matrix-wrap { margin-top: 12px; }
+.matrix-cell.clickable { cursor: pointer; }
+.matrix-cell.clickable:hover { background: #4176e60d; }
+.run-id-line { margin-bottom: 3px; }
+.legend { color: var(--fg-secondary); font-size: 12px; margin-top: 6px; }
+
+/* 确认区域 */
+.prep-meta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.diff-table .row-diff { background: #c53d3d0d; }
+.disable-reasons { color: var(--err); margin: 8px 0 0; padding-left: 20px; }
+.warn-line { color: var(--warn); }
+.confirm-digest { margin: 8px 0; }
+
+/* 运行区域 */
+.run-select { max-width: 420px; }
+.run-badges { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.event-list { font-size: 12.5px; color: var(--fg-secondary); max-height: 220px; overflow: auto; padding-left: 18px; }
+
+/* 结果区域 */
+.claim-list { padding-left: 18px; }
+.claim-list li { margin-bottom: 4px; }
+.claim-draft { opacity: .8; }
+
+/* ---- 云图实况网格 ---- */
+.scene-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin:10px 0}
+.scene-fig{margin:0;background:#fff;border:1px solid var(--dsw-alias-border-l2,#0000001a);border-radius:10px;overflow:hidden}
+.scene-fig img{display:block;width:100%;height:auto;cursor:zoom-in;background:#fafbfc}
+.scene-fig figcaption{padding:6px 10px;font-size:11px;color:var(--dsw-alias-label-tertiary,#62666b);border-top:1px solid var(--dsw-alias-border-l1,#0000000f)}

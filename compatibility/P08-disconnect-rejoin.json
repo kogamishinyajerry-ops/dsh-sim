@@ -1,0 +1,29 @@
+{
+ "probe_id": "P08",
+ "name": "断线重入",
+ "target": "关闭DSH/重启工程API不破坏已启动计算",
+ "executed_at": "2026-09-21T15:55:00+08:00",
+ "environment": {
+  "os": "Windows 11 Home China (10.0.26200.9457)",
+  "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+ },
+ "commands": [
+  "scripts/reprobe_p08_p09.py（复测脚本，2026-09-21 功能清点轮）",
+  "临时 SQLite 库起 API → createTask → createRevision → prepareTask(202) → SIGKILL → 重启 → GET /tasks/{id} → POST /jobs/claim"
+ ],
+ "output_excerpts": [
+  "API#1 SIGKILL → API#2 restarted",
+  "task survives restart (state=PREPARING)",
+  "claim after restart: http=200 job=job_5f35ab57bbeb428c91b0 kind=PREPARE"
+ ],
+ "missing_dependencies": [],
+ "note": "复测发现的持久化竞态已修复：prepareTask 202 响应曾先于事务提交，SIGKILL 窗口内作业丢失。修复（api/deps.py store() 内同步 commit）后复测通过：PREPARING 状态与 PREPARE 作业在SIGKILL 后完整存活、重启后可 claim。147 测试全绿无回归。",
+ "evidence_files": [
+  "compatibility/reprobe-2026-09-21.json"
+ ],
+ "conclusion": "PASS(工程服务层限定)",
+ "unblock_conditions": [
+  "真实 STAR 计算在断线下的存活性仍属 P05 限定（batch 进程独立于 API 已附带观察）",
+  "无人值守常驻 Worker + 真实求解断线重入为后续 WP（升级为完整 PASS 的条件）"
+ ]
+}

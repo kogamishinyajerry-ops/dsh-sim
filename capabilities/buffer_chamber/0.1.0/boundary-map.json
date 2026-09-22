@@ -1,0 +1,33 @@
+{
+  "capability_package_id": "buffer_chamber",
+  "version": "0.1.0",
+  "description": "工程角色 → 软件对象与签名 的映射骨架（定义书 §能力包与最小知识体系 boundary-map.json；§输入契约与摘要规则：按稳定边界 role_id 填写 field 与 quantity）。",
+  "status": "UNCONFIRMED",
+  "roles": [
+    {
+      "role_id": "inlet",
+      "engineering_meaning": "缓冲腔入口边界",
+      "software_object": null,
+      "signature": null,
+      "status": "UNCONFIRMED",
+      "note": "TBD-05：模板、边界角色、截面与软件对象映射由 R4 与现场模板整理后冻结。软件对象与签名（边界名称、面积/质心等）必须经 P04 角色绑定探针与人工标识一致，不能猜测映射。"
+    },
+    {
+      "role_id": "outlet_a",
+      "engineering_meaning": "缓冲腔出口 A（A/B 对比之出口一）",
+      "software_object": null,
+      "signature": null,
+      "status": "UNCONFIRMED",
+      "note": "TBD-05。出口分配指标（outlet_distribution）依赖本角色与 outlet_b 的可靠绑定；不能可靠匹配时停止准备。"
+    },
+    {
+      "role_id": "outlet_b",
+      "engineering_meaning": "缓冲腔出口 B（A/B 对比之出口二）",
+      "software_object": null,
+      "signature": null,
+      "status": "UNCONFIRMED",
+      "note": "TBD-05。同上。"
+    }
+  ],
+  "freeze_rule": "boundary-map 的每个 role 必须由 inspect_template 返回的真实边界角色候选与人工标识核对一致（P04）后才可转为 CONFIRMED；不得将猜测类名当作能力（定义书 §STAR-CCM+适配器定义 inspect_template）。"
+}

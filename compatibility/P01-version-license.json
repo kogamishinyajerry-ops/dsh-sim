@@ -1,0 +1,42 @@
+{
+  "probe_id": "P01",
+  "name": "版本/授权",
+  "target": "真实版本、启动路径、合法授权及基本运行记录",
+  "executed_at": "2026-09-20T21:45:55+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)",
+    "star_executable": "C:\\Program Files\\Siemens\\19.02.009-R8\\STAR-CCM+19.02.009-R8\\star\\bin\\starccm+.bat",
+    "other_installations": [
+      "C:\\Program Files\\Siemens\\17.06.007-R8\\STAR-CCM+17.06.007-R8\\star\\bin\\starccm+.bat"
+    ],
+    "cli_bridge": "<STARCCM_CLI_DIR>\\starccm_cli.py v49.0.0 (83 commands)",
+    "python": "<PYTHON_ENV>\\Scripts\\python.exe"
+  },
+  "commands": [
+    "python \"<STARCCM_CLI_DIR>\\starccm_cli.py\" capabilities --json",
+    "python \"<STARCCM_CLI_DIR>\\starccm_cli.py\" sim-summary \"<STARCCM_CLI_DIR>\\Cases\\Case1.sim\" --json",
+    "\"C:\\Program Files\\Siemens\\19.02.009-R8\\STAR-CCM+19.02.009-R8\\star\\bin\\starccm+.bat\" -version",
+    "python \"<STARCCM_CLI_DIR>\\starccm_cli.py\" license-probe --json"
+  ],
+  "output_excerpts": [
+    "capabilities: \"ok\": true, \"total_commands\": 83, \"version\": \"49.0.0\" (exit=0)",
+    "sim-summary Case1.sim (3.83GB): catalog_complete=true, scan_strategy=head+tail, headline=Steady · Coupled Flow · Coupled Energy · Ideal Gas · Realizable k-epsilon (2-layer) | 1 region / 9 boundaries (exit=0)",
+    "starccm+.bat -version: Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)",
+    "license-probe (real spawn, elapsed=54.97s): available_licenses=[read_only, basic_geom, ccmpsuite_solve], missing_licenses=[ccmpsuite_init], can_solve_init=false, can_run_simulation=false, recommendation=export-images-from-solved-sim",
+    "P02 spawn log 旁证: \"ccmpsuite checked out（授权文件路径已脱敏）\"",
+    "P02 spawn log 警告: \"License build date: 16 February 2023 / This version of the code requires license version 2024.02 or greater.\""
+  ],
+  "evidence_files": [
+    "compatibility/raw/p01_capabilities.json",
+    "compatibility/raw/p01_sim_summary.json",
+    "compatibility/raw/p01_license_probe.json",
+    "compatibility/raw/p02_savecopy.log"
+  ],
+  "conclusion": "PASS",
+  "caveats": [
+    "license 为 ccmpsuite 单 copy, 实际 checkout 已观察(P02/P05 spawn 均成功); 但 ccmpsuite_init 缺失 → 新算例初始化(can_solve_init=false)不可用, 影响 P05 全新算例路径",
+    "license 文件 build date 2023-02-16 早于 2402 要求的 2024.02, STAR 打印警告但仍 checkout 成功; 长期合规性由站点管理员确认(TBD-07)",
+    "CLI 桥配置指向 19.02.009-R8 (2402); 17.06.007-R8 (2210? 实为 17.06) 同时存在, 版本基线锁定时需明确(FR-27)"
+  ]
+}

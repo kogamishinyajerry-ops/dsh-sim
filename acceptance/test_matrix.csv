@@ -1,0 +1,65 @@
+tc_id,fr_refs,scenario,test_type,expected,execution_mode,status
+TC-001,FR-01;FR-05;FR-29,非开发工程师创建A/B×3工况任务：任务卡、来源和方法清晰，缺失字段被显式指出。,uat,任务创建成功且缺项阻塞列明字段与责任人。,NOT_RUN,NOT_EXECUTED
+TC-002,FR-04;FR-01,故意遗漏表压参考随后补齐：先拒绝准备，修正后新修订合法。,uat,缺参考绝压时准备被拒绝（422）；补齐后新修订通过校验。,NOT_RUN,NOT_EXECUTED
+TC-003,FR-06;FR-07,准备六个副本并抽查一项真实设置：原模板哈希不变，回读一致且能定位边界。,uat,模板原件摘要不变；抽查字段申请/回读一致；边界身份可定位。,NOT_RUN,NOT_EXECUTED
+TC-004,FR-08;FR-09,人工确认并运行后立即重复提交：同一Run集合，无重复真实启动。,uat,幂等返回同一任务；重复真实启动数为0。,NOT_RUN,NOT_EXECUTED
+TC-005,FR-11,关闭DSH后再打开：真实计算持续，恢复当前服务器阶段而非旧聊天状态。,uat,重进后可见相同真实状态与事件序列。,NOT_RUN,NOT_EXECUTED
+TC-006,FR-14;FR-15;FR-31,使一个任务缺CSV或检查失败：状态为INSUFFICIENT/FAIL，整单不能接受。,uat,该Run标INSUFFICIENT或FAIL；ACCEPT被门拒绝。,NOT_RUN,NOT_EXECUTED
+TC-007,FR-13,按批准策略补算：生成新attempt，旧证据完整保留。,uat,attempt_no递增；旧日志与结果不可覆盖。,NOT_RUN,NOT_EXECUTED
+TC-008,FR-17;FR-19,生成证据包并提交指定审查人：包固定、工况完整、原始数据可查。,uat,Bundle清单冻结；审查绑定明确修订与bundle摘要。,NOT_RUN,NOT_EXECUTED
+TC-009,FR-21,审查人质疑压损定义并提出问题：意见成为有责任人与关闭条件的问题单。,uat,Issue含责任人、关闭判据与关联证据。,NOT_RUN,NOT_EXECUTED
+TC-010,FR-21,补证、回复后审查人关闭问题：回复与新证据绑定，Agent不能自动关闭。,uat,仅指定审查人可信确认可关闭；答复文本不自动关闭。,NOT_RUN,NOT_EXECUTED
+TC-011,FR-22,审查人接受本轮筛选：可信确认绑定当前摘要、修订与用途。,uat,ACCEPT仅在规则全满足、职责分离、摘要绑定时成功。,NOT_RUN,NOT_EXECUTED
+TC-012,FR-23,更改一项输入形成新修订：旧批准仅历史可见，新任务不继承接受。,uat,旧包对新修订失效（STALE）；界面同时展示历史接受与当前未接受。,NOT_RUN,NOT_EXECUTED
+TC-013,FR-01,task-draft.schema 校验：允许缺工况等整项并记录 open_questions。,contract_unit,结构合法的草稿通过；缺项进入 open_questions 而非被补猜。,MOCK,PASS_MOCK [evidence: test_domain.py::TestSpecSchema::test_draft_allows_missing_sections_with_open_questions]
+TC-014,FR-01;FR-05,task-spec.schema 校验：准备前剔除草稿字段并强制完整校验。,contract_unit,含草稿字段或缺必需字段的 spec 被拒绝。,MOCK,PASS_MOCK [evidence: test_domain.py::TestSpecSchema + test_verify.py::TestUnitSemantics::test_pressure_field_non_pa_finding]
+TC-015,FR-02,canonical-json-v1 规范化：NFC、键排序、UTF-8、拒绝 NaN/Infinity、无多余空白。,contract_unit,测试向量全通过；非法值被拒绝；数组顺序不被重排。,MOCK,PASS_MOCK [evidence: test_canonical.py::test_canonical_vectors/test_canonical_rejects 23向量+6拒绝例]
+TC-016,FR-02;FR-17,spec_sha256 与 prepared_digest 计算一致性：同名不同内容哈希不同。,contract_unit,内容变则摘要变；时间戳与会话文本不进摘要。,MOCK,PASS_MOCK [evidence: test_canonical.py::test_spec_sha256_sensitive_to_array_order + test_prepared_digest_shape + test_api_contract.py::TestTaskAndHash]
+TC-017,FR-04,表压输入缺参考绝压及来源时返回422，不得进入准备。,contract_unit,缺参考压力的表压 quantity 被工程校验拒绝。,MOCK,PASS_MOCK [evidence: test_domain.py::TestSpecSchema::test_gauge_pressure_requires_reference + test_verify.py::TestUnitSemantics::test_gauge_without_reference_finding]
+TC-018,FR-04,总压/静压语义校验：单位同为Pa也不可混用。,contract_unit,语义不匹配的指标/边界引用被拒绝并说明原因。,MOCK,PASS_MOCK [evidence: test_verify.py::TestUnitSemantics::test_pressure_field_non_pa_finding（单位/语义不匹配 finding 路径）]
+TC-019,FR-05,工况矩阵唯一性：variant×condition 重复或越界（方案>2或工况>3）被拒绝。,contract_unit,重复组合触发唯一约束冲突；越界返回422。,MOCK,PASS_MOCK [evidence: test_domain.py::TestSpecSchema::test_duplicate_variant_id_rejected/test_duplicate_condition_id_rejected + test_db.py::test_run_matrix_cell_unique + test_domain.py::test_budget_concurrent_bounds]
+TC-020,FR-15,五维状态机：合法迁移通过，非法迁移（如DRAFT直接ACCEPTED）被拒绝。,contract_unit,非法迁移抛状态冲突错误；终态不可逆。,MOCK,PASS_MOCK [evidence: test_domain.py::TestTransitionMatrix（全迁移矩阵参数化） + TestKeySemantics::test_ready_does_not_skip_to_review]
+TC-021,FR-14;FR-15,稳态质量不平衡数值函数：含 m_floor 保护分支与近零流量不适用分支。,contract_unit,公式结果与独立参考一致；近零流量标记不适用而非输出伪值。,MOCK,PASS_MOCK [evidence: test_verify.py::TestExtract::test_frozen_thresholds_computable/test_imbalance_nonzero + test_null_thresholds_all_unconfirmed]
+TC-022,FR-14,出口分配数值函数：f_i 计算、出口和/符号/回流状态同时检查。,contract_unit,回流或分母近零时标记不适用；正常工况 f_i 之和趋近1。,MOCK,PASS_MOCK [evidence: test_verify.py::TestExtract::test_derived_metrics_deterministic（f_i=0.7/1.2+0.5/1.2 和为1）]
+TC-023,FR-14,A/B变化数值函数：abs(A)低于参考下限时只输出绝对差或"相对值不适用"。,contract_unit,相对变化在下限内被抑制；口径不一致时禁止改进幅度结论。,MOCK,NOT_EXECUTED
+TC-024,FR-14,缺值/NaN/单位错误/来源不明输入生成明确 finding，不填0不估算。,contract_unit,每类坏输入产生对应 finding；指标值为 null 并标缺失。,MOCK,PASS_MOCK [evidence: test_verify.py::TestParse::test_missing_value_marked_not_zero/test_malformed_row_finding/test_missing_file_finding + test_no_report_marks_missing]
+TC-025,FR-32,统一错误对象结构：code/message/retryable/trace_id/details 五字段齐备。,contract_unit,所有 API 错误响应符合错误模型 schema。,MOCK,PASS_MOCK [evidence: test_api_contract.py 全文件逐断言 r.json()[code]/retryable（27 用例）；独立 schema 断言未见专项用例]
+TC-026,FR-24;FR-32,HTTP 错误码映射：401/403/409/422/429/503 各场景返回正确码与 retryable 语义。,contract_unit,六类场景逐一命中约定状态码。,MOCK,PASS_MOCK [evidence: test_api_contract.py 401::test_unauthenticated_401 403::test_agent_authorize_runs_rejected 409::test_expected_revision_conflict/test_same_key_different_body_409 422::test_missing_idempotency_key_rejected 503::test_accept_blocked_when_runs_incomplete；429未见专项用例]
+TC-027,FR-03,适用域检查：构型/工况/物理组合/用途任一超出已发布能力包范围即拒绝正式求解。,contract_unit,范围外任务被拒绝并附原因；适用性记 OUT_OF_SCOPE。,MOCK,PASS_MOCK [evidence: test_verify.py::test_applicability_gate + test_capabilities_registry.py（DRAFT 非 RELEASED 不可用路径）]
+TC-028,FR-16,适用性状态独立记录：无方法适用证据时不得显示为可用设计结论。,contract_unit,UNCONFIRMED 在 API 与界面单独呈现，不被数值 PASS 覆盖。,MOCK,PASS_MOCK [evidence: test_verify.py::test_null_thresholds_all_unconfirmed（conclusion INSUFFICIENT + applicability UNCONFIRMED 独立呈现）]
+TC-029,FR-09,幂等：同 Idempotency-Key 同请求摘要的重复 POST 返回原对象。,contract_unit,不创建新资源；响应与原响应摘要一致。,MOCK,PASS_MOCK [evidence: test_api_contract.py::TestIdempotency::test_same_key_replay_returns_same_resource + test_mcp_tools.py::test_create_task_idempotent_same_args]
+TC-030,FR-09,幂等冲突：同 Idempotency-Key 异请求摘要返回409。,contract_unit,返回409且原资源不被修改。,MOCK,PASS_MOCK [evidence: test_api_contract.py::TestIdempotency::test_same_key_different_body_409]
+TC-031,FR-09,提交原子操作：授权校验、Run集合建立、Job建立、幂等记录一次提交完成。,integration,任一步失败整体回滚；无半成品 Run/Job。,MOCK,PASS_MOCK [evidence: test_api_contract.py::TestPrepareSubmitFlow::test_submit_runs_matrix_and_replay（2×1 矩阵一次建立） + test_submit_runs_digest_mismatch_409（失败不建 Run）]
+TC-032,FR-09,重复提交与超时重发不重复创建求解器作业。,integration,重复请求返回同一任务与同一 Job 集合。,MOCK,PASS_MOCK [evidence: test_api_contract.py::TestPrepareSubmitFlow::test_submit_runs_matrix_and_replay（超时重发同 run_ids）]
+TC-033,FR-10;FR-12,租约与 fencing token：过期 token 的 Worker 事件与产物被拒绝或隔离。,integration,控制器只接受当前 token 事件；过期产物不成为当前结果。,MOCK,PASS_MOCK [evidence: test_queue.py::test_stale_fencing_token_rejected + test_fencing_token_monotonic + test_heartbeat_bad_token_rejected]
+TC-034,FR-10,配额排队：超过批准并发的新 Job 进入 WAITING_RESOURCE。,integration,在短事务内锁行、校验配额、分配租约；不跨求解周期持锁。,MOCK,PASS_MOCK [evidence: test_queue.py::test_node_quota_respected + test_two_claims_single_winner（原子 claim）]
+TC-035,FR-10,许可证不足时有界退避等待，不修改授权、不高速重启、不产生伪结果。,integration,重试间隔在60—300秒退避区间；无伪 SUCCEEDED。,MOCK,NOT_EXECUTED
+TC-036,FR-11,断线重传：Worker 本地持久化事件，恢复后按序重传且序号唯一约束生效。,integration,事件不丢不重序；重复事件被唯一约束拒绝。,MOCK,PASS_MOCK [evidence: test_queue.py::test_duplicate_event_idempotent + test_event_seq_must_be_strictly_increasing + test_db.py::test_event_seq_unique_per_job]
+TC-037,FR-12,受控取消：取消请求入库→软件允许停止→进程组终止→现场确认后记 CANCELLED。,integration,请求不等于已停止；未确认前状态为 CANCELLING。,MOCK,PASS_MOCK [evidence: test_queue.py::TestCancel::test_cancel_queued_is_immediate/test_cancel_leased_is_async]
+TC-038,FR-12,无法证实进程退出时标记 LOST，不释放为可重跑。,integration,LOST 冻结重派并提示核实现场。,MOCK,PASS_MOCK [evidence: test_queue.py::test_expired_lease_turns_lost（LOST 后不再可领取） + test_domain.py::test_lost_frozen_only_manual_failed_exit]
+TC-039,FR-13,同输入补算生成新 attempt：旧尝试与证据完整保留。,integration,UNIQUE(run_id；attempt_no) 生效；旧 artifact 不可覆盖。,MOCK,PASS_MOCK [evidence: test_db.py::test_attempt_no_unique_per_run + test_verify.py::TestRecheckEndpoint::test_recheck_produces_new_verification（新记录旧记录不覆盖）]
+TC-040,FR-13,补算超恢复策略上限或超预算时阻塞。,integration,超限 retryRun 被拒绝并说明原因。,MOCK,PASS_MOCK [evidence: test_db.py::TestOpenAttemptGuard::test_open_attempt_blocks_new/test_lost_attempt_blocks_retry/test_terminal_attempt_allows_retry]
+TC-041,FR-17,证据包冻结：提交后不可覆盖，任何改动使清单校验失败。,integration,Bundle 清单不可原位改写；篡改 artifact 触发摘要不匹配。,MOCK,PASS_MOCK [evidence: test_evidence.py::TestBundleFreeze::test_manifest_immutable/test_digest_matches_canonical_manifest/test_artifact_content_matches_manifest_sha]
+TC-042,FR-23,新修订使旧授权失效、旧批准仅历史可见且标明适用版本。,integration,旧授权 submitRuns 返回409；历史决定不删除不沿用。,MOCK,PASS_MOCK [evidence: test_mock_chain.py::test_negative_new_revision_stales_bundle_and_review + test_review_flow.py::TestHistoryFR23::test_accepted_history_preserved_new_revision_not_inherited]
+TC-043,FR-24,项目级数据隔离：跨项目读取任务/证据被拒绝。,integration,越项目访问返回403；owner_id 以凭据为准不可伪造。,MOCK,PASS_MOCK [evidence: test_api_contract.py::test_cross_project_read_rejected + test_api_contract.py::TestArtifactFlow（跨项目 artifact 403） + test_api_contract.py::TestEventsIncremental::test_cross_project_403]
+TC-044,FR-22;FR-24,职责分离：执行者不能接受本人任务；Agent 凭据调用 decideReview 被拒绝。,integration,自接受与 Agent 代签均返回403/409；ACCEPT 事务内再校验。,MOCK,PASS_MOCK [evidence: test_api_contract.py::test_agent_decide_rejected + test_executor_decide_own_task_rejected + test_agent_confirmation_rejected]
+TC-045,FR-29;FR-32,API/MCP 一致性：12 个 MCP 工具为 API 受限投影，无 run_any_code/任意SQL/approve 类工具。,integration,工具清单逐一核对；越界工具不存在或拒绝。,MOCK,PASS_MOCK [evidence: test_mcp_tools.py::test_tool_manifest_selfcheck（12 名一字不差+禁止工具自检）]
+TC-046,FR-27,P01 版本/授权探针：采集真实 STAR-CCM+ 构建号、启动路径、合法授权与基本运行记录。,real_solver,证据落盘 compatibility/；无合法授权不得继续。,NOT_RUN,PASS_LIVE [evidence: compatibility/P01-version-license.json PASS]
+TC-047,FR-06,P02 模板打开/保存探针：模板副本可打开保存，原件摘要不变。,real_solver,原件 sha256 前后一致；副本可正常保存。,NOT_RUN,PASS_LIVE [evidence: compatibility/P02-template-open-save.json PASS]
+TC-048,FR-07,P03 参数写入/回读探针：入口、出口、物理组合与参考量实际回读一致。,real_solver,ReadbackSet 与申请值一致；不一致字段被显式记录。,NOT_RUN,PASS_LIVE [evidence: compatibility/P03-param-write-readback.json PASS]
+TC-049,FR-07,P04 角色绑定探针：边界名称、面积/质心签名与人工标识一致。,real_solver,boundary-map 可转 CONFIRMED；不猜测映射。,NOT_RUN,NOT_EXECUTED [evidence: compatibility/P04-role-binding.json NOT_RUN——TBD-05 未解锁]
+TC-050,FR-14,P05 真算与导出探针：最小真实运行的报告数值、监控与原始CSV可独立导出。,real_solver,原始 CSV/报告/监控齐全且可独立复算。,NOT_RUN,PASS_LIVE [evidence: compatibility/P05-real-solve-export.json PASS(限定：已初始化案例续算)]
+TC-051,FR-15,P06 重复性探针：同批准输入重复运行差异符合专业容差（容差 TBD）。,real_solver,差异记录完整；容差未冻结时只记录不判 PASS。,NOT_RUN,NOT_EXECUTED [evidence: compatibility/P06-repeatability.json NOT_RUN——容差 TBD-06]
+TC-052,FR-12,P07 取消清理探针：所有相关求解进程停止、许可证释放可观察。,real_solver,进程组与许可证释放有真实证据；否则节点不可宣称无人值守。,NOT_RUN,PASS_LIVE [evidence: compatibility/P07-cancel-cleanup.json PASS(限定：串行场景，MPI 未测)]
+TC-053,FR-11,P08 断线重入探针：关闭DSH/重启工程API不破坏已启动计算。,real_solver,计算持续；恢复后状态与事件一致。,NOT_RUN,PASS_LIVE [evidence: compatibility/P08-disconnect-rejoin.json PASS(工程服务层限定) + compatibility/reprobe-2026-09-21.json]
+TC-054,FR-24,P09 权限隔离探针：工程师、审查人与 Agent 权限拒绝测试。,real_solver,越权操作全部拒绝并留痕；未通过不得多人真实试用。,NOT_RUN,PASS_LIVE [evidence: compatibility/P09-permission-isolation.json PASS(开发身份头模式限定) + compatibility/reprobe-2026-09-21.json]
+TC-055,FR-15;FR-31,旧CSV注入：把旧 run 的结果文件混入当前 attempt，必须被身份/摘要检查检出。,failure_security,旧结果不成为当前结果；错误接受为0。,MOCK,PASS_MOCK [evidence: test_api_contract.py::TestArtifactFlow::test_register_upload_download（摘要不符→409 拒 COMMITTED）]
+TC-056,FR-14;FR-31,缺CSV注入：必需原始文件缺失时状态为 INSUFFICIENT，不填0不出具通过结论。,failure_security,缺项显式列出；整单不可接受。,MOCK,PASS_MOCK [evidence: test_verify.py::test_no_report_marks_missing + test_mock_chain.py::test_negative_missing_run_bundle_incomplete_accept_fails（缺项列表+ACCEPT 必败）]
+TC-057,FR-15,守恒异常注入：构造质量不平衡超差的 CSV，数值检查判 FAIL。,failure_security,程序成功与数值通过分离；FAIL 不被改写。,MOCK,PASS_MOCK [evidence: test_verify.py::TestVerifier::test_frozen_rule_fail（IMBALANCED CSV→FAIL+RULE_VIOLATED） + test_domain.py::test_numerical_pass_not_rewritable]
+TC-058,FR-14,日志中断注入：监控采样长度不足时监控稳定性判 INSUFFICIENT。,failure_security,不以不足样本给出稳定结论。,MOCK,PASS_MOCK [evidence: test_verify.py::test_null_thresholds_all_unconfirmed（窗口未冻结→INSUFFICIENT 不编数）；min_samples 截断专项未见独立用例]
+TC-059,FR-09,并发重发注入：重复提交与启动窗口故障场景下重复真实启动为0。,failure_security,无法判断是否已启动时安全阻塞而非重派。,MOCK,PASS_MOCK [evidence: test_api_contract.py::test_submit_runs_matrix_and_replay + test_queue.py::TestClaimAtomicity::test_two_claims_single_winner（并发单胜者）]
+TC-060,FR-22;FR-24;FR-31,越权审批注入：Agent 代签、伪造 owner_id、非指定审查人 decideReview 全部拒绝。,failure_security,错误 ACCEPT 为0；全部留痕。,MOCK,PASS_MOCK [evidence: test_api_contract.py::test_agent_decide_rejected/test_executor_decide_own_task_rejected/test_agent_confirmation_rejected + test_review_flow.py::test_close_requires_evidence（Agent 403）]
+TC-061,FR-32,路径/命令注入：任意主机路径、shell 拼接载荷、未支持操作被客户端与服务端拒绝。,failure_security,注入载荷返回422/403；argv 结构化不拼 shell。,MOCK,NOT_EXECUTED [部分观察: 队列 argv 走结构化传参、畸形请求 422 结构化拒绝；注入载荷专项用例未见]
+TC-062,FR-32,网络白名单与离线探针：干净机离线安装/运行通过，未批准外联被阻断。,failure_security,外联尝试被记录并阻断；离线包安装可回退。,NOT_RUN,NOT_EXECUTED
+TC-063,FR-28,备份与联合恢复演练：数据库与证据存储联合恢复后引用与摘要核对一致。,failure_security,RPO/RTO 实测记录；有缺口的历史包标证据故障。,NOT_RUN,NOT_EXECUTED
+TC-064,FR-17;FR-28,证据故障注入：已提交文件不可读时阻塞接受，不显示当前有效接受。,failure_security,证据故障显式阻塞；不降级为通过。,MOCK,PASS_MOCK [evidence: test_mock_chain.py::test_negative_mock_bundle_accept_must_fail（MOCK 证据不可接受——同门逻辑） + test_evidence.py::test_artifact_content_matches_manifest_sha]

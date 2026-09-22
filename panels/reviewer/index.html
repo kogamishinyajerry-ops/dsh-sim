@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH-Sim 审查工作台（WP-15）</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="./reviewer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>审查工作台</h1>
+  <span class="topbar-note">审查人视图 · 全程只读证据 · X-Dev-Roles=REVIEWER（开发模式，生产走受信会话）</span>
+  <span class="spacer"></span>
+  <span id="evidence-mode-slot"></span>
+  <button id="btn-refresh" class="btn btn-xs" type="button">刷新</button>
+</header>
+
+<div id="offline-slot"></div>
+
+<div class="layout">
+  <!-- 左列：审查定位 -->
+  <aside class="card">
+    <h2>审查定位</h2>
+    <label class="field">
+      <span>审查 ID（review_id）</span>
+      <input id="manual-review-id" type="text" placeholder="rev-…" spellcheck="false">
+    </label>
+    <button id="btn-load-review" class="btn btn-xs" type="button">加载审查</button>
+    <div id="review-list-note" class="muted-line" style="margin-top:10px">
+      审查列表接口未列入 openapi.v0.1；请从 DSH 对话或任务卡复制 review_id 加载。
+    </div>
+  </aside>
+
+  <main>
+    <!-- 区域 1：审查摘要 -->
+    <section id="summary-pane" class="card">
+      <h2>审查摘要</h2>
+      <div id="summary-body"><p class="muted-line">尚未加载审查。</p></div>
+    </section>
+
+    <!-- 区域 2：阻塞清单（置顶） -->
+    <section id="blockers-pane" class="card blockers-top">
+      <h2>阻塞清单（存在未关闭阻塞时禁止接受）</h2>
+      <div id="blockers-body"><p class="muted-line">加载审查后显示工况缺失 / 数值 FAIL / 证据 INSUFFICIENT / 范围 UNCONFIRMED / 输入 STALE / 未关闭问题。</p></div>
+    </section>
+
+    <!-- 区域 3：证据抽查链 -->
+    <section id="evidence-pane" class="card">
+      <h2>证据抽查链（结论 → 指标定义 → 原始数值 → 实际设置 → 方法范围）</h2>
+      <div id="evidence-body"><p class="muted-line">逐级展开；可触发独立复算。</p></div>
+    </section>
+
+    <!-- 区域 4：整改区域 -->
+    <section id="issues-pane" class="card">
+      <h2>整改区域</h2>
+      <div id="issues-body"><p class="muted-line">问题单：严重度 / 责任人 / 关闭判据 / 回复 / 新证据 / 状态。</p></div>
+    </section>
+
+    <!-- 区域 5：决定区域 -->
+    <section id="decision-pane" class="card">
+      <h2>决定区域</h2>
+      <div id="decision-body"><p class="muted-line">两个主动作：退回补充 / 接受本轮；拒绝在次级菜单。</p></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal-root"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

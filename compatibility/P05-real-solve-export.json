@@ -1,0 +1,39 @@
+{
+  "probe_id": "P05",
+  "name": "真算与导出",
+  "target": "最小真实运行；报告数值、监控与原始CSV可独立导出",
+  "executed_at": "2026-09-20T22:04:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)",
+    "license": "ccmpsuite 可 checkout；ccmpsuite_init 缺失"
+  },
+  "case": {
+    "source": "<STARCCM_CLI_DIR>\\Cases\\lid_driven_cavity_solved.sim (已求解状态, 1.98MB)",
+    "work_copy": "<TEMP>\\dsh_probe_p02\\p05_solved_copy.sim",
+    "continued_sim": "<TEMP>\\dsh_probe_p02\\p05_continued.sim (1986561 bytes)",
+    "note": "已初始化案例续算; 全新算例 init 路径受 ccmpsuite_init 缺失阻塞(P01)"
+  },
+  "commands": [
+    "starccm+.bat p05_solved_copy.sim -batch SolveContinueProbe.java (续算 step(5) + 残差导出 CSV + saveState)"
+  ],
+  "output_excerpts": [
+    "[P05] iter_before=5005",
+    "[P05] iter_after=5030",
+    "[P05] residual Continuity last=1.0329097703580026E-5 n=5000",
+    "[P05] residual X-momentum last=5.251324475978477E-6 n=5000",
+    "[P05] residual Energy last=0.03849348709581495 n=5000",
+    "[P05] csv_written=.../p05_residuals.csv monitors=7",
+    "[P05] saved -> .../p05_continued.sim / [P05] DONE (exit=0)"
+  ],
+  "exported_csv_excerpt": "monitor,last_value,n_samples / Continuity,1.0329097703580026E-5,5000 / X-momentum,5.251324475978477E-6,5000 / ... (7 行, 独立可读)",
+  "evidence_files": [
+    "compatibility/raw/p05_continue_solve.log",
+    "compatibility/raw/p05_residuals.csv"
+  ],
+  "conclusion": "PASS",
+  "caveats": [
+    "范围限定: 已初始化案例的真实续算与残差 CSV 导出; 未覆盖(a)全新算例 init(ccmpsuite_init 缺失)(b)场数据/报告表 CSV 导出(export-report 等)(c)缓冲腔压损/流量分配报告 — 这些须在批准模板与完整 license 下补测",
+    "step(5) 实际推进 25 迭代(5005→5030), 宏 step 语义须在固定宏中核实并注释"
+  ]
+}

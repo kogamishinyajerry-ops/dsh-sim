@@ -1,0 +1,48 @@
+{
+  "probe_id": "P03",
+  "name": "参数写入/回读",
+  "target": "至少入口、出口、物理组合与参考量实际回读一致",
+  "executed_at": "2026-09-20T22:00:00+08:00",
+  "environment": {
+    "os": "Windows 11 Home China (10.0.26200.9457)",
+    "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+  },
+  "template": {
+    "source": "<STARCCM_CLI_DIR>\\Cases\\cyl_vortex_v153R_fixinlet.sim (Steady · Segregated Flow · SST k-omega · 8 boundaries, 6.8MB)",
+    "source_sha256": "dbc7ca8b98df13d3022ab86e3dbacbcdb7f2a5d2108048751e98b5dabb94dd76 (探针后复核不变)",
+    "work_copy": "<TEMP>\\dsh_probe_p02\\p03_template.sim",
+    "written_copy": "<TEMP>\\dsh_probe_p02\\p03_written.sim (6839876 bytes)"
+  },
+  "commands": [
+    "starccm+.bat p03_template.sim -batch WriteReadbackProbe.java (写入)",
+    "starccm+.bat p03_written.sim -batch ReadbackPersistProbe.java (重开持久化回读)"
+  ],
+  "output_excerpts": [
+    "[P03] boundary: name=z_min type=速度入口",
+    "[P03] boundary: name=z_max type=压力出口",
+    "[P03] WRITE boundary=z_min region=Region 1 velocity_magnitude BEFORE=30.0 TARGET=31.0 READBACK=31.0",
+    "[P03] saved -> .../p03_written.sim / [P03] DONE (exit=0)",
+    "[P03R] boundary=z_min persisted_velocity=31.0 / [P03R] DONE (重开文件, exit=0)"
+  ],
+  "boundary_inventory_real": [
+    {"name": "Default Boundary", "type": "壁面"},
+    {"name": "x_min", "type": "壁面"},
+    {"name": "x_max", "type": "壁面"},
+    {"name": "y_min", "type": "壁面"},
+    {"name": "y_max", "type": "壁面"},
+    {"name": "z_min", "type": "速度入口"},
+    {"name": "z_max", "type": "压力出口"},
+    {"name": "cylinder_r0.5_l10.0_n32", "type": "壁面"}
+  ],
+  "write_api_confirmed": "bnd.getValues().get(VelocityMagnitudeProfile.class).getMethod(ConstantScalarProfileMethod.class).getQuantity().setValue(v); 回读同路径 getRawValue(); 注意 VelocityInletBoundary 类名在 star.flow 不可 import(编译错误), 改用 getValues().get(VelocityMagnitudeProfile.class) 探测(与既有宏 AccSetInletVelocity.java 一致)",
+  "evidence_files": [
+    "compatibility/raw/p03_write_readback.log",
+    "compatibility/raw/p03_persist_readback.log",
+    "compatibility/raw/p03_sim_summary.json"
+  ],
+  "conclusion": "PASS",
+  "caveats": [
+    "仅验证速度入口单字段(z_min velocity_magnitude 30.0→31.0, 即时回读+重开持久化均一致); 出口/参考量/物理组合的回读矩阵须按能力包白名单逐字段扩展(WP-06)",
+    "开发案例非批准模板; 缓冲腔任务族的入口/出口语义须由 boundary-map 定义后复测"
+  ]
+}

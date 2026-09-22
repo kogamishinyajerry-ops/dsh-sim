@@ -1,0 +1,19 @@
+{
+  "capability_package_id": "buffer_chamber",
+  "version": "0.1.0",
+  "name": "STAR-CCM+ 缓冲腔 CFD 任务族能力包",
+  "description": "稳态单相内流缓冲腔任务族（design_screening 用途）的最小知识体系骨架。本版本为 DRAFT，未经 Owner 发布不得用于正式任务。",
+  "status": "DRAFT",
+  "compatibility": {
+    "dsh_version": "UNCONFIRMED",
+    "star_ccm_version": "UNCONFIRMED",
+    "note": "兼容清单必须由真实环境采集（P01 版本/授权探针）后由 Owner 冻结。参考定义书 TBD-01/TBD-02：锁版兼容探针未通过，不部署生产扩展；STAR 真实构建未确认则阻塞自主闭环。manifest 自身不嵌入自身哈希，manifest_sha256 由服务在外层计算并交审批记录绑定（定义书 §证据包、结论与可追溯性）。"
+  },
+  "status_semantics": {
+    "allowed_values": ["DRAFT", "RELEASED", "RETIRED"],
+    "rule": "只有 RELEASED 且与当前软件匹配的能力包可用于正式任务；发布审核必须核对引用可解析、模板与宏哈希、真实探针、业务适用范围和独立参考结果，不能仅验证 manifest 结构就宣称方法批准（定义书 §能力包与最小知识体系）。"
+  },
+  "created_by": "Agent B (capability-asset)",
+  "created_at": "2026-09-20",
+  "spec_reference": "DSH工业仿真智能体_首版开发设计定义书_v0.1.md §能力包与最小知识体系"
+}

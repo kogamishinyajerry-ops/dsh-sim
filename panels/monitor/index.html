@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH-Sim 仿真监控台</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="./monitor.css">
+</head>
+<body>
+
+<!-- 顶栏：标题 + 服务状态徽章 + 常驻 evidence_mode 徽章 -->
+<header class="topbar">
+  <h1>仿真监控台</h1>
+  <span class="topbar-note">只读实况 · 3s 轮询工程服务 · 页面不可见时暂停</span>
+  <span id="service-status-slot" title="工程服务连通状态（在线/离线/待探测）"></span>
+  <span class="spacer"></span>
+  <span id="evidence-mode-slot" title="evidence_mode：MOCK/REAL/UNKNOWN，绝不混淆"></span>
+  <button id="btn-refresh" class="btn btn-xs" type="button">刷新</button>
+</header>
+
+<!-- 服务离线横幅占位（不静默空白） -->
+<div id="offline-slot"></div>
+
+<div class="layout layout-single">
+  <main id="main-pane">
+    <!-- 区域 1：运行中任务卡列表（核心）；空态时在此显示提示 -->
+    <section id="monitor-pane" class="card">
+      <h2>运行中的仿真作业</h2>
+      <p id="poll-status" class="poll-line">初始化…</p>
+      <div id="run-cards"><p class="muted-line">首次加载中…</p></div>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

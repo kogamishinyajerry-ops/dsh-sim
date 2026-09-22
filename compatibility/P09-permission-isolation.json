@@ -1,0 +1,29 @@
+{
+ "probe_id": "P09",
+ "name": "权限隔离",
+ "target": "工程师、审查人与Agent权限拒绝测试",
+ "executed_at": "2026-09-21T15:55:00+08:00",
+ "environment": {
+  "os": "Windows 11 Home China (10.0.26200.9457)",
+  "star_version": "Simcenter STAR-CCM+ 2402 Build 19.02.009 (win64/clang15.0vc14.2-r8 Double Precision)"
+ },
+ "commands": [
+  "scripts/reprobe_p08_p09.py + 三轮修正探测（项目一致、全字段请求体）",
+  "AGENT authorizeRuns（全字段） / 跨项目 GET /tasks/{id} / 执行者本人 decideReview"
+ ],
+ "output_excerpts": [
+  "1) AGENT authorize: http=403 FORBIDDEN | Agent 身份不能取得人工批准动作",
+  "2) 跨项目读: http=403 FORBIDDEN",
+  "3) 执行者 decide 自己 review: http=403 FORBIDDEN | 仅指定审查人可执行该动作"
+ ],
+ "missing_dependencies": [],
+ "evidence_files": [
+  "compatibility/reprobe-2026-09-21.json"
+ ],
+ "conclusion": "PASS(开发身份头模式限定)",
+ "unblock_conditions": [
+  "生产受信 IdP 集成（TBD-08，定义书既定边界）",
+  "注意：请求体校验先于身份门——畸形请求得到 422 而非 403，属正常顺序非缺陷"
+ ],
+ "note": "三类越权全部 403 精确拒绝：AGENT 授权门、项目隔离门、职责分离门各司其职，错误消息指向具体 FR 条款。"
+}

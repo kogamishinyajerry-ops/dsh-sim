@@ -1,0 +1,54 @@
+/* dsh-sim · panels/reviewer/reviewer.css — 审查台局部样式 */
+
+.topbar-note { color: var(--fg-secondary); font-size: 12.5px; }
+
+.mock-watermark {
+  font-style: italic;
+  color: var(--mock-fg);
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: 1px dashed var(--mock-fg);
+  border-radius: 4px;
+  padding: 0 8px;
+}
+
+/* 阻塞清单置顶 */
+.blockers-top { border-left: 4px solid var(--err); }
+.blocker-counts { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.blocker-group { border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 6px; }
+.blocker-group ul { margin: 4px 0; padding-left: 20px; }
+
+/* 摘要 */
+.fact-grid {
+  display: grid; grid-template-columns: 110px 1fr; gap: 2px 12px;
+  margin: 10px 0; font-size: 13px;
+}
+.fact-grid dt { color: var(--fg-secondary); }
+.fact-grid dd { margin: 0; }
+
+/* 整改 */
+.issue-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.issue-card.status-OPEN { border-left: 4px solid var(--err); }
+.issue-card.status-DRAFT { border-left: 4px solid var(--muted); }
+.issue-card.status-CLOSED { border-left: 4px solid var(--ok); opacity: .85; }
+.issue-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.reply-list { font-size: 13px; color: var(--fg-primary); padding-left: 18px; border-left: 2px solid var(--border); }
+.reply-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.issue-form { max-width: 560px; }
+
+/* 决定区域 */
+.secondary-action { margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--border); }
+.accept-disabled {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-top: 10px;
+  background: #a66b0008;
+}
+.accept-disabled ul { margin: 4px 0 0; padding-left: 20px; color: var(--err); }
+.warn-line { color: var(--warn); font-weight: 600; }

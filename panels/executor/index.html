@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH-Sim 执行任务工作台（WP-12）</title>
+<link rel="stylesheet" href="../shared/styles.css">
+<link rel="stylesheet" href="./executor.css">
+</head>
+<body>
+
+<!-- 顶栏：常驻 evidence_mode 徽章 + 服务状态 -->
+<header class="topbar">
+  <h1>执行任务工作台</h1>
+  <span class="topbar-note">工程师视图 · 证据只读来源为工程服务</span>
+  <span class="spacer"></span>
+  <span id="evidence-mode-slot" title="evidence_mode：MOCK/REAL/UNKNOWN，绝不混淆"></span>
+  <button id="btn-refresh" class="btn btn-xs" type="button">刷新</button>
+</header>
+
+<!-- 服务离线横幅占位（不静默空白） -->
+<div id="offline-slot"></div>
+
+<div class="layout">
+  <!-- 区域 1：左侧任务列表 -->
+  <aside id="task-list-pane" class="card">
+    <h2>任务列表</h2>
+    <div class="filter-row" role="tablist" aria-label="任务筛选">
+      <button class="filter-btn" data-filter="mine"   type="button">需要我处理</button>
+      <button class="filter-btn" data-filter="active" type="button">运行中</button>
+      <button class="filter-btn" data-filter="review" type="button">待审查</button>
+      <button class="filter-btn" data-filter="history" type="button">历史</button>
+    </div>
+    <div id="task-list"></div>
+    <div class="manual-load">
+      <label class="field">
+        <span>任务 ID（列表接口未就绪时手工加载）</span>
+        <input id="manual-task-id" type="text" placeholder="task-…" spellcheck="false">
+      </label>
+      <button id="btn-load-task" class="btn btn-xs" type="button">加载任务</button>
+    </div>
+  </aside>
+
+  <!-- 主列 -->
+  <main id="main-pane">
+    <!-- 区域 2：主任务卡 -->
+    <section id="task-card" class="card">
+      <h2>主任务卡</h2>
+      <div id="task-card-body"><p class="muted-line">尚未加载任务。</p></div>
+    </section>
+
+    <!-- 区域 3：确认区域 -->
+    <section id="confirm-pane" class="card">
+      <h2>确认区域（申请值 / 真实回读对照）</h2>
+      <div id="confirm-body"><p class="muted-line">准备完成后在此对照差异并人工确认。</p></div>
+    </section>
+
+    <!-- 区域 4：运行区域 -->
+    <section id="run-pane" class="card">
+      <h2>运行区域</h2>
+      <div id="run-body"><p class="muted-line">提交运行后在此显示真实阶段与心跳。</p></div>
+    </section>
+
+    <!-- 区域 5：结果区域 -->
+    <section id="result-pane" class="card">
+      <h2>结果区域</h2>
+      <div id="result-body"><p class="muted-line">先展示"对设计问题的回答"与限制，再展开指标与原始文件。</p></div>
+    </section>
+  </main>
+</div>
+
+<!-- 模态挂载点 -->
+<div id="modal-root"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

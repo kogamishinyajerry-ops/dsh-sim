@@ -1,0 +1,32 @@
+{
+  "capability_package_id": "buffer_chamber",
+  "version": "0.1.0",
+  "domain": {
+    "task_family": "buffer_chamber",
+    "physics_combination": "steady_single_phase_internal_flow",
+    "physics_note": "一个经业务批准的稳态单相内流方法组合；具体密度、能量和湍流设置由能力包固定（定义书 §范围、假设与明确不做的事）。本骨架不填写具体湍流模型/壁面处理/网格策略——属 Owner 冻结项 TBD-03。",
+    "purpose": "design_screening",
+    "purpose_note": "purpose 首版固定为 design_screening（定义书 §输入契约与摘要规则 method/review 字段组）。不得自动生成适航符合性结论。"
+  },
+  "parameter_domain": {
+    "whitelist_fields": null,
+    "whitelist_note": "仅允许能力包白名单内的工况字段被修改；白名单内容属 Owner/方法工程师冻结项（TBD-03/TBD-04），本次开发不填。",
+    "parameter_lower_bounds": null,
+    "parameter_upper_bounds": null,
+    "bounds_note": "TBD: Owner 冻结。参数上下界属于『不能让本次开发填的工程阈值』（定义书 §不能让本次开发填的工程阈值）。"
+  },
+  "applicability": {
+    "geometry_scope": "UNCONFIRMED",
+    "condition_scope": "UNCONFIRMED",
+    "physics_scope": "UNCONFIRMED",
+    "usage_scope": "UNCONFIRMED",
+    "note": "适用范围全部 UNCONFIRMED（Applicability 三态之一，定义书 §任务、数值、适用与审查状态）。范围未知统一 UNCONFIRMED（TBD-04）；没有方法适用证据不能显示为可用设计结论（FR-16）。"
+  },
+  "out_of_scope": [
+    "任意CAD自动建模",
+    "新拓扑自动识别",
+    "多物理场耦合（热/结构）",
+    "自主DOE寻优",
+    "非本任务族的湍流模型/壁面处理/网格策略自由切换"
+  ]
+}

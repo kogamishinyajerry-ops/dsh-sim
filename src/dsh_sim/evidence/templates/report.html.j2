@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>证据报告 · {{ task_id }} · R{{ revision }}</title>
+<style>
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 2rem; color: #1c2530; position: relative; }
+  header.report-head { border-bottom: 2px solid #345; padding-bottom: .6rem; margin-bottom: 1rem; }
+  .mode-badge { display: inline-block; padding: .15rem .7rem; border-radius: 4px; font-weight: 700; letter-spacing: .12em; }
+  .mode-REAL { background: #e3f5e9; color: #146c2e; border: 1px solid #146c2e; }
+  .mode-MOCK { background: #fdecea; color: #b3261e; border: 2px dashed #b3261e; }
+  .mode-UNKNOWN { background: #f1f1f1; color: #555; border: 1px solid #999; }
+  .mock-stripes { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: repeating-linear-gradient(45deg, transparent 0 34px, rgba(179,38,30,.06) 34px 68px); }
+  .mock-words { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, 1fr); }
+  .mock-words span { display: flex; align-items: center; justify-content: center;
+    font-size: 2.6rem; font-weight: 800; color: rgba(179,38,30,.10); transform: rotate(-30deg); letter-spacing: .3em; }
+  main { position: relative; z-index: 1; }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0 1.2rem; }
+  th, td { border: 1px solid #c9d2dc; padding: .35rem .55rem; text-align: left; font-size: .92rem; }
+  th { background: #eef2f7; }
+  .state { font-weight: 600; }
+  .s-SUCCEEDED, .s-PASS, .s-IN_SCOPE, .s-CONFIRMED { color: #146c2e; }
+  .s-FAILED, .s-FAIL, .s-OUT_OF_SCOPE { color: #b3261e; }
+  .s-LOST, .s-INSUFFICIENT, .s-UNCONFIRMED, .s-NOT_CHECKED, .s-DRAFT { color: #8a5a00; }
+  .warn-box { border: 1px solid #8a5a00; background: #fff8e6; padding: .6rem .9rem; border-radius: 6px; }
+  .err-box { border: 2px solid #b3261e; background: #fdecea; padding: .6rem .9rem; border-radius: 6px; }
+  details { margin: .15rem 0; }
+  code { background: #f1f4f8; padding: 0 .3em; border-radius: 3px; font-size: .88em; }
+  h1 { font-size: 1.35rem; } h2 { font-size: 1.1rem; margin-top: 1.6rem; border-left: 4px solid #345; padding-left: .5rem; }
+  .meta { color: #56616d; font-size: .88rem; }
+</style>
+</head>
+<body>
+{% if is_mock %}
+<div class="mock-stripes"></div>
+<div class="mock-words">{% for _ in watermark_cells %}<span>MOCK</span>{% endfor %}</div>
+{% endif %}
+<main>
+<header class="report-head">
+  <h1>证据报告 · 任务 {{ task_id }} · 修订 R{{ revision }}</h1>
+  <p>
+    证据模式：<span class="mode-badge mode-{{ evidence_mode }}">{{ evidence_mode }}</span>
+    {% if is_mock %}<strong>（本报告全部数据为 MOCK，非真实求解器输出，不得作为工程结论）</strong>{% endif %}
+  </p>
+  <p class="meta">
+    证据包 <code>{{ bundle_id }}</code> · 清单摘要（不含报告条目）<code>{{ manifest_digest }}</code><br>
+    spec 摘要 <code>{{ spec_sha256 }}</code> · 创建人 {{ owner_id }}
+  </p>
+  <p>用途：{{ purpose }}（内部方案筛选；不构成适航符合性结论） · 审查范围：{{ review_scope }} · 方法包：{{ capability_package_id }}</p>
+</header>
+
+<h2>多维状态（逐 Run；执行成功 ≠ 数值通过 ≠ 方法适用）</h2>
+<table>
+  <tr><th>Run</th><th>方案×工况</th><th>执行</th><th>数值</th><th>适用性</th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><code>{{ r.run_id }}</code></td>
+    <td>{{ r.variant_id }}×{{ r.condition_id }}</td>
+    <td class="state s-{{ r.execution_state }}">{{ r.execution_state }}</td>
+    <td class="state s-{{ r.numerical_state }}">{{ r.numerical_state }}</td>
+    <td class="state s-{{ r.applicability_state }}">{{ r.applicability_state }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>定量结论（每条 Claim 绑定 metric_id + artifact_id，可展开来源）</h2>
+{% if claims %}
+<table>
+  <tr><th>指标</th><th>结论（程序模板生成；CONFIRMED 表示数字与独立复算一致）</th><th>作者类型</th><th>状态</th><th>来源</th></tr>
+  {% for c in claims %}
+  <tr>
+    <td><code>{{ c.metric_id }}</code></td>
+    <td>{{ c.text }}</td>
+    <td>{{ c.author_type }}</td>
+    <td class="state s-{{ c.state }}">{{ c.state }}</td>
+    <td><details><summary>展开</summary>artifact <code>{{ c.artifact_id }}</code></details></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="warn-box">无定量 Claim：指标缺失或提取未完成；未完成的结论不得当作设计结论。</p>
+{% endif %}
+
+<h2>缺项与限制（单独一节；缺项不靠减少清单通过）</h2>
+{% if complete %}
+<p>必需工况完整性：齐备。</p>
+{% else %}
+<div class="err-box">
+  <strong>证据包 incomplete：缺 {{ incomplete_items|length }} 项，阻塞 ACCEPT。</strong>
+  <ul>
+    {% for m in incomplete_items %}
+    <li>[{{ m.kind }}] 工况 {{ m.cell or '—' }} {% if m.run_id %}（run <code>{{ m.run_id }}</code>{% if m.execution_state %} · {{ m.execution_state }}{% endif %}）{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+<p class="warn-box">限制：{{ limitations }}</p>
+<p>未覆盖问题：见审查记录与 issue 列表（本报告不代替审查判断；模型解释与审查人最终意见在记录中有不同作者类型）。</p>
+
+<h2>冻结清单（{{ manifest|length }} 项；长度 + sha256，提交后不可覆盖）</h2>
+<table>
+  <tr><th>角色</th><th>路径</th><th>长度</th><th>sha256</th></tr>
+  {% for m in manifest %}
+  <tr>
+    <td>{{ m.role }}</td>
+    <td><code>{{ m.logical_path }}</code></td>
+    <td>{{ m.length }}</td>
+    <td><code>{{ m.sha256 }}</code></td>
+  </tr>
+  {% endfor %}
+</table>
+</main>
+</body>
+</html>

@@ -1,0 +1,87 @@
+{
+  "capability_package_id": "buffer_chamber",
+  "version": "0.1.0",
+  "description": "冻结校核规则骨架。规则 id 列表已就位，全部阈值为 null，待 Owner 冻结（TBD-06）。状态 DRAFT。",
+  "status": "DRAFT",
+  "self_check_logic": {
+    "rule": "发布检查（RELEASE gate）必须扫描本文件及 metric-definitions.json：任何工程阈值（tolerance / window / m_floor / reference_floor / reference_tolerance / allowed_variation / approved_* / min_samples / bounds）仍为 null 或 \"TBD\" 时，拒绝将能力包置为 RELEASED（定义书 §不能让本次开发填的工程阈值：『发布检查发现仍未冻结时拒绝 RELEASED』）。",
+    "consumed_by": "审查服务/发布门的确定性检查逻辑（非模型判断）",
+    "fields_consumed": [
+      "rules[].rule_id",
+      "rules[].threshold",
+      "rules[].severity",
+      "rules[].status",
+      "status",
+      "self_check_logic.fields_consumed"
+    ]
+  },
+  "rules": [
+    {
+      "rule_id": "RULE-MASS-IMBALANCE",
+      "name": "稳态质量不平衡校核",
+      "target_metric": "steady_mass_imbalance",
+      "check": "abs(sum_b m_b) / max(sum_in abs(m_b), m_floor) <= threshold",
+      "threshold": null,
+      "threshold_note": "TBD: Owner 冻结",
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-MONITOR-STABILITY",
+      "name": "监控量稳定性校核",
+      "target_metric": "monitor_stability",
+      "check": "批准窗口内监控量变化幅度/趋势满足允许值，且采样长度 >= min_samples",
+      "window": null,
+      "min_samples": null,
+      "allowed_variation": null,
+      "threshold_note": "TBD: Owner 冻结",
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-GRID-POLICY",
+      "name": "批准网格策略校核",
+      "target_metric": null,
+      "check": "当前算例网格策略与能力包批准的网格策略一致；新几何或尺度改变超出证据范围时停在 UNCONFIRMED",
+      "approved_grid_policy": null,
+      "threshold_note": "TBD: Owner 冻结（TBD-03）。首版运行时检查已批准网格策略与质量界限，并非每单自动三套网格计算（定义书 §网格与方法证据怎么落地）。",
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-OUTLET-DISTRIBUTION-SANITY",
+      "name": "出口分配合理性校核",
+      "target_metric": "outlet_distribution",
+      "check": "出口和、符号、回流状态同时检查通过；f_i 之和趋近 1 的偏差不超过 threshold",
+      "threshold": null,
+      "threshold_note": "TBD: Owner 冻结",
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-AB-REFERENCE-FLOOR",
+      "name": "A/B 相对变化参考下限校核",
+      "target_metric": "ab_delta",
+      "check": "abs(A) > reference_floor 时才允许输出相对变化，否则显示绝对差或『相对值不适用』",
+      "reference_floor": null,
+      "threshold_note": "TBD: Owner 冻结",
+      "severity": "WARNING",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-APPLICABILITY-GATE",
+      "name": "适用域门",
+      "target_metric": null,
+      "check": "任务构型/工况/物理组合/用途全部落在 domain.json 已 CONFIRMED 范围内；任何一项 UNCONFIRMED 则任务适用性为 UNCONFIRMED，拒绝正式求解（FR-03/FR-16，G-applicability）",
+      "threshold": null,
+      "threshold_note": "TBD: Owner 冻结（依赖 domain.json 适用范围由 UNCONFIRMED 转为 CONFIRMED）",
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    }
+  ],
+  "gate_mapping": {
+    "G-input": ["RULE-APPLICABILITY-GATE"],
+    "G-numerical": ["RULE-MASS-IMBALANCE", "RULE-MONITOR-STABILITY", "RULE-GRID-POLICY", "RULE-OUTLET-DISTRIBUTION-SANITY", "RULE-AB-REFERENCE-FLOOR"],
+    "note": "门定义见定义书 §数值、方法与工程接受的门。程序成功与数值通过分别判定（FR-15）；存在数值 FAIL / 证据 INSUFFICIENT / 范围 UNCONFIRMED 时 ACCEPT 必须失败（§审查可以接受什么）。"
+  }
+}

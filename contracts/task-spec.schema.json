@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-sim.local/contracts/task-spec.schema.json",
+  "title": "TaskSpec",
+  "description": "dsh-sim 准备前的完整业务输入形态（定义书 §输入契约与摘要规则）。TaskSpec 只承载业务输入；task_id、创建者与权限由服务产生或从凭据解析。结构合法不等于工程合法：服务还必须校验引用存在、项目权限、方法范围与跨字段一致性。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["purpose", "variants", "conditions", "execution_budget", "method"],
+  "properties": {
+    "purpose": {
+      "const": "design_screening",
+      "description": "首版固定为 design_screening（定义书 §输入契约 method/review 行）。"
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/variant" },
+      "description": "1—2 个方案。variant_id 在数组内必须唯一；该唯一性由服务强制（JSON Schema 无法表达跨元素唯一）。数组顺序有意义，禁止排序。"
+    },
+    "conditions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/condition" },
+      "description": "1—3 个工况。condition_id 在数组内必须唯一（服务强制）。每工况必需字段由能力包检查。"
+    },
+    "execution_budget": { "$ref": "#/$defs/execution_budget" },
+    "method": { "$ref": "#/$defs/method" }
+  },
+  "$defs": {
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "64 位小写十六进制 SHA-256。哈希仅由服务计算；客户端值以服务端重算为准。"
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["si_value", "unit", "physical_meaning", "source_ref"],
+      "properties": {
+        "si_value": {
+          "type": "number",
+          "description": "SI 规范值，必须为有限数值（canonical-json-v1 拒绝 NaN/Infinity）。"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SI 单位符号（如 Pa、kg/s、K）。"
+        },
+        "physical_meaning": {
+          "type": "string",
+          "minLength": 1,
+          "description": "物理含义（如 inlet_total_pressure、outlet_mass_flow）。"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "业务参数来源引用；数值、单位、物理含义与来源一起保存。"
+        },
+        "original_value": {
+          "type": "number",
+          "description": "界面保留的原始输入值（转换前）。"
+        },
+        "original_unit": {
+          "type": "string",
+          "description": "原始输入单位。"
+        },
+        "conversion_note": {
+          "type": "string",
+          "description": "原值到 SI 规范值的转换过程说明。"
+        }
+      }
+    },
+    "pressure_quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["si_value", "unit", "physical_meaning", "source_ref", "pressure_kind", "pressure_semantics"],
+      "properties": {
+        "si_value": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1 },
+        "physical_meaning": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "original_value": { "type": "number" },
+        "original_unit": { "type": "string" },
+        "conversion_note": { "type": "string" },
+        "pressure_kind": {
+          "enum": ["absolute", "gauge"],
+          "description": "绝压/表压。表压必须携带参考绝压及来源（FR-04）。"
+        },
+        "pressure_semantics": {
+          "enum": ["total", "static"],
+          "description": "总压/静压语义；不因单位同为 Pa 而混用。"
+        },
+        "reference_absolute_pressure": {
+          "$ref": "#/$defs/quantity",
+          "description": "表压的参考绝压（含其自身 source_ref）。pressure_kind=gauge 时必填。"
+        }
+      },
+      "if": {
+        "properties": { "pressure_kind": { "const": "gauge" } },
+        "required": ["pressure_kind"]
+      },
+      "then": {
+        "required": ["reference_absolute_pressure"]
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant_id", "template_artifact_id", "template_sha256", "boundary_map_sha256"],
+      "properties": {
+        "variant_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "方案标识，任务内唯一。"
+        },
+        "template_artifact_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "已登记模板 artifact 的标识；未经批准的新文件不得直接成为方法模板。"
+        },
+        "template_sha256": { "$ref": "#/$defs/sha256_hex" },
+        "boundary_map_sha256": {
+          "$ref": "#/$defs/sha256_hex",
+          "description": "boundary_map（工程角色→软件对象映射）的内容摘要。"
+        }
+      }
+    },
+    "condition_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role_id", "field", "quantity"],
+      "properties": {
+        "role_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "稳定边界角色标识（来自能力包 boundary-map）。"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "description": "该角色上要写入的字段名（白名单内）。"
+        },
+        "quantity": {
+          "oneOf": [
+            { "$ref": "#/$defs/quantity" },
+            { "$ref": "#/$defs/pressure_quantity" }
+          ]
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition_id", "fields"],
+      "properties": {
+        "condition_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "工况标识，任务内唯一。"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/condition_field" },
+          "description": "按稳定边界 role_id 填写的 field 与 quantity。"
+        }
+      }
+    },
+    "execution_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_concurrent", "cpu_cores", "memory_gb", "wallclock_hours", "max_attempts_total"],
+      "properties": {
+        "max_concurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2,
+          "description": "并发 1—2；仍受节点与站点更严格配额约束。"
+        },
+        "cpu_cores": { "type": "integer", "minimum": 1 },
+        "memory_gb": { "type": "number", "exclusiveMinimum": 0 },
+        "wallclock_hours": { "type": "number", "exclusiveMinimum": 0 },
+        "max_attempts_total": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "总 attempt 上限；补算受该预算限制，无无限重试。"
+        }
+      }
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_package_id", "capability_package_sha256", "required_metrics", "review_scope"],
+      "properties": {
+        "capability_package_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "已发布（RELEASED）能力包标识。"
+        },
+        "capability_package_sha256": { "$ref": "#/$defs/sha256_hex" },
+        "required_metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "必需指标标识列表（指标定义随能力包批准）。"
+        },
+        "review_scope": {
+          "type": "string",
+          "minLength": 1,
+          "description": "本轮审查适用范围与用途说明。"
+        }
+      }
+    }
+  }
+}

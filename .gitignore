@@ -1,0 +1,30 @@
+# 运行时数据（含内部任务库与演示证据，不入公开库）
+var/
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 环境与编辑器
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+
+# 大产物
+*.sim
+*.png
+!docs/*.png
+node_modules/
+compatibility/raw/
+plugin/dsh-sim-plugin-offline.zip
