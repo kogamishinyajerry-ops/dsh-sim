@@ -354,6 +354,28 @@ class IssueReply(BaseModel):
     created_at: datetime
 
 
+class IssueClosureEvidence(BaseModel):
+    """关闭证据条目：实际使用的 artifact 及其冻结摘要（上游报告问题 4）。"""
+
+    artifact_id: str
+    sha256: str
+    logical_path: str
+    role: str | None = None
+
+
+class IssueClosure(BaseModel):
+    """问题关闭记录：关闭人、被关闭版本、证据、绑定包与时间（可从历史完整回看）。"""
+
+    closure_id: str
+    issue_id: str
+    issue_version: int
+    closed_by: str
+    bundle_digest: str
+    evidence: list[IssueClosureEvidence] = Field(default_factory=list)
+    confirmation_id: str
+    closed_at: datetime
+
+
 class IssueStatus(str, Enum):
     DRAFT = "DRAFT"
     OPEN = "OPEN"
@@ -373,6 +395,7 @@ class ReviewIssue(BaseModel):
     related_artifact_ids: list[str] = Field(default_factory=list)
     related_run_ids: list[str] = Field(default_factory=list)
     replies: list[IssueReply] = Field(default_factory=list)
+    closures: list[IssueClosure] = Field(default_factory=list)
     status: IssueStatus
     version: int = Field(ge=1)
     closed_by: str | None = None
