@@ -1,6 +1,9 @@
-"""API 依赖：身份解析（开发模式）、DB 会话、幂等上下文。
+"""API 依赖：身份解析（显式开发模式）、DB 会话、幂等上下文。
 
-- 身份：X-Dev-Subject / X-Dev-Roles / X-Dev-Projects（生产须换受信 IdP，TBD-08）。
+- 身份：**只有显式声明本地开发模式**时才接受自报头
+  X-Dev-Subject / X-Dev-Roles / X-Dev-Projects；其它情况（未声明、空值、
+  无法识别的取值、明确的生产模式）一律 401 硬拒绝——生产用户主体必须来自
+  受信 IdP（TBD-08）。上游报告问题 5：界面角色下拉框不是安全边界。
 - 幂等：Idempotency-Key → idempotency_records；同 key 同摘要返回原响应，
   同 key 异摘要 → 409 CONFLICT_IDEMPOTENCY（CONVENTIONS §3.4）。
 """
@@ -15,7 +18,28 @@ from sqlalchemy.orm import Session
 from dsh_sim.canonical import canonical_dumps, sha256_hex
 from dsh_sim.db.models import IdempotencyRecordRow
 from dsh_sim.domain.errors import ApiError, ErrorCode
-from dsh_sim.domain.identity import Identity, parse_dev_identity
+from dsh_sim.domain.identity import (
+    DEV_HEADER_PROJECTS,
+    DEV_HEADER_ROLES,
+    DEV_HEADER_SUBJECT,
+    Identity,
+    parse_dev_identity,
+)
+
+#: 显式身份模式开关。只有取值在 DEV_MODE_VALUES 内才算开发模式。
+IDENTITY_MODE_ENV = "DSH_SIM_IDENTITY_MODE"
+DEV_MODE_VALUES = frozenset({"dev", "development", "local"})
+DEV = "dev"
+PROD = "prod"
+
+
+def resolve_identity_mode(raw: str | None) -> str:
+    """把开关值解析为 dev / prod。
+
+    **fail-closed**：未设置、空串或任何无法识别的取值都按生产模式处理；
+    只有显式写出 dev/development/local 才启用开发模式身份头。
+    """
+    return DEV if (raw or "").strip().lower() in DEV_MODE_VALUES else PROD
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -32,7 +56,24 @@ def get_session(request: Request) -> Iterator[Session]:
 
 
 def get_identity(request: Request) -> Identity:
+    mode = getattr(request.app.state, "identity_mode", PROD)
     headers = {k.lower(): v for k, v in request.headers.items()}
+    if mode != DEV:
+        # 上游报告问题 5：非开发环境默认拒绝自报身份头，不能先信任输入再靠角色判断兜底。
+        looks_like_dev = any(
+            h.lower() in headers
+            for h in (DEV_HEADER_SUBJECT, DEV_HEADER_ROLES, DEV_HEADER_PROJECTS)
+        )
+        raise ApiError(
+            ErrorCode.UNAUTHORIZED,
+            "身份模式非开发模式：拒绝自报身份头（X-Dev-*）。"
+            "生产环境用户主体与权限必须来自受信身份提供方（TBD-08）",
+            details={
+                "identity_mode": mode,
+                "dev_headers_present": looks_like_dev,
+                "hint": f"仅本地开发可用 {IDENTITY_MODE_ENV}=dev 显式开启开发模式",
+            },
+        )
     identity = parse_dev_identity(headers)
     if identity is None:
         raise ApiError(ErrorCode.UNAUTHORIZED, "缺少身份凭据（开发模式：X-Dev-Subject 头）")
@@ -164,10 +205,15 @@ def idempotency(action: str):
 
 
 __all__ = [
+    "DEV",
+    "DEV_MODE_VALUES",
+    "IDENTITY_MODE_ENV",
+    "PROD",
     "IdempotencyContext",
     "StoredResponse",
     "active_project",
     "get_identity",
     "get_session",
     "idempotency",
+    "resolve_identity_mode",
 ]

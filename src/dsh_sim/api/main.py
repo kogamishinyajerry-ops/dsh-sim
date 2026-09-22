@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -15,8 +16,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from dsh_sim.api.deps import IDENTITY_MODE_ENV, PROD, resolve_identity_mode
 from dsh_sim.db.session import init_db, make_engine, make_session_factory
 from dsh_sim.domain.errors import ApiError, ErrorCode
+
+logger = logging.getLogger("dsh_sim.api")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PANELS_DIR = REPO_ROOT / "panels"
@@ -27,7 +31,13 @@ DEFAULT_CAPABILITIES_ROOT = REPO_ROOT / "capabilities"
 def create_app(
     database_url: str | None = None,
     artifact_root: str | Path | None = None,
+    identity_mode: str | None = None,
 ) -> FastAPI:
+    """应用工厂。
+
+    identity_mode：显式身份模式；缺省读环境变量 DSH_SIM_IDENTITY_MODE。
+    **fail-closed**：未显式声明开发模式即按生产模式处理（拒绝自报身份头）。
+    """
     app = FastAPI(title="DSH 工业仿真智能体 工程 API", version="0.1.0")
 
     engine = make_engine(database_url)
@@ -37,6 +47,19 @@ def create_app(
     app.state.artifact_root = Path(
         artifact_root or os.environ.get("DSH_SIM_ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT
     )
+    app.state.identity_mode = resolve_identity_mode(
+        identity_mode if identity_mode is not None else os.environ.get(IDENTITY_MODE_ENV)
+    )
+    if app.state.identity_mode == PROD:
+        logger.warning(
+            "身份模式=prod：拒绝 X-Dev-* 自报身份头（生产用户主体须来自受信 IdP，TBD-08）。"
+            "本地联调请显式设置 %s=dev。",
+            IDENTITY_MODE_ENV,
+        )
+    else:
+        logger.warning(
+            "身份模式=dev：接受 X-Dev-* 自报身份头，仅供本地/隔离环境，不得用于生产。"
+        )
 
     @app.middleware("http")
     async def trace_id_middleware(request: Request, call_next):  # noqa: ANN001, ANN202
