@@ -445,4 +445,152 @@ def build_bundle(
     return bundle
 
 
-__all__ = ["build_bundle", "bundle_evidence_mode", "compute_completeness"]
+def manifest_snapshot(
+    session: Session, bundle: BundleRow
+) -> tuple[list[RunRow], list[ArtifactRow], list[dict[str, Any]]]:
+    """按冻结 manifest 裁剪验收输入（上游报告问题 1：冻结包是验收对象）。
+
+    - artifacts：manifest 条目按 artifact_id 精确匹配（冻结后新 Run/新 attempt 的
+      证据不会混入旧包验收）；
+    - verifications：从 manifest 中 role=verification 的**冻结副本字节**解析
+      （VerificationRow 无不可变守卫，DB 行冻结后可能被改；验收只认冻结时的
+      conclusion/attempt_id/source_artifact_ids）；
+    - runs：拥有上述冻结工件的 Run（Run 当前状态保留 DB 实时值——冻结后
+      attempt 更换/状态回退本身就该阻塞旧包，属于"失效而非改写"）。
+    """
+    manifest_ids = {e["artifact_id"] for e in bundle.manifest}
+    artifacts = (
+        session.query(ArtifactRow)
+        .filter(ArtifactRow.artifact_id.in_(manifest_ids))
+        .all()
+        if manifest_ids
+        else []
+    )
+    by_id = {a.artifact_id: a for a in artifacts}
+    missing = sorted(manifest_ids - set(by_id))
+    if missing:
+        raise ApiError(
+            ErrorCode.CONFLICT_DIGEST,
+            "冻结包 manifest 引用的 artifact 不存在（来源缺失，ACCEPT 阻塞）",
+            details={"bundle_id": bundle.bundle_id, "missing_artifact_ids": missing[:20]},
+        )
+    verifications: list[dict[str, Any]] = []
+    for entry in bundle.manifest:
+        if entry["role"] != "verification":
+            continue
+        art = by_id.get(entry["artifact_id"])
+        if art is None or not art.storage_path:
+            continue  # 字节缺失由 verify_bundle_integrity 报 corrupted
+        raw = Path(art.storage_path).read_text(encoding="utf-8")
+        body_text = raw
+        if raw.startswith("#"):  # 剥离 _json_bytes 的 MOCK banner（若有）
+            body_text = raw.split("\n", 1)[1] if "\n" in raw else raw
+        verifications.append(json.loads(body_text))
+    run_ids_with_evidence = {a.run_id for a in artifacts if a.run_id}
+    run_ids_with_evidence |= {v.get("run_id") for v in verifications if v.get("run_id")}
+    runs_q = (
+        session.query(RunRow)
+        .filter_by(task_id=bundle.task_id, revision=bundle.revision)
+        .all()
+    )
+    runs = [r for r in runs_q if r.run_id in run_ids_with_evidence]
+    return runs, artifacts, verifications
+
+
+def verify_bundle_integrity(session: Session, bundle: BundleRow) -> dict[str, list[str]]:
+    """冻结包完整性校验（ACCEPT 前置；上游报告问题 1）。
+
+    1) digest 绑定：bundle_digest 必须等于 canonical(manifest) 的重算摘要；
+    2) 字节校验：每个 manifest 条目按 storage_path 重读文件，sha256/length
+       与冻结值一致——文件被改一字节即阻塞。
+    返回 problems dict（空 = 通过）。不抛异常，供审查门并入 problems 逐条列因。
+    """
+    problems: dict[str, list[str]] = {}
+    recomputed = sha256_hex(canonical_dumps(bundle.manifest))
+    if recomputed != bundle.bundle_digest:
+        problems["bundle_digest_mismatch"] = [bundle.bundle_id]
+    by_id = {
+        a.artifact_id: a
+        for a in session.query(ArtifactRow)
+        .filter(
+            ArtifactRow.artifact_id.in_([e["artifact_id"] for e in bundle.manifest])
+        )
+        .all()
+    } if bundle.manifest else {}
+    corrupted: list[str] = []
+    for entry in bundle.manifest:
+        art = by_id.get(entry["artifact_id"])
+        if art is None or not art.storage_path:
+            corrupted.append(entry["artifact_id"])
+            continue
+        p = Path(art.storage_path)
+        if not p.is_file():
+            corrupted.append(entry["artifact_id"])
+            continue
+        data = p.read_bytes()
+        if hashlib.sha256(data).hexdigest() != entry["sha256"] or len(data) != entry["length"]:
+            corrupted.append(entry["artifact_id"])
+    if corrupted:
+        problems["bundle_artifact_corrupted"] = sorted(set(corrupted))
+    return problems
+
+
+def compute_completeness_manifest(
+    session: Session,
+    bundle: BundleRow,
+    runs: list[RunRow],
+    artifacts: list[ArtifactRow],
+    verifications: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """manifest 维度的必需工况完整性（冻结集合内判定；上游报告问题 1）。
+
+    与 compute_completeness 同口径，但 Run/attempt/artifact/verification 全部
+    限定在冻结集合内：冻结后补算的新证据不能让旧包由 incomplete 变 complete。
+    """
+    rev = (
+        session.query(TaskRevisionRow)
+        .filter_by(task_id=bundle.task_id, revision=bundle.revision)
+        .first()
+    )
+    missing: list[dict[str, Any]] = []
+    if rev is None:
+        return {"complete": False, "missing": [{"kind": "NO_REVISION", "revision": bundle.revision}]}
+    spec = rev.spec
+    runs_by_cell = {(r.variant_id, r.condition_id): r for r in runs}
+    artifacts_by_run: dict[str, list[ArtifactRow]] = {}
+    for a in artifacts:
+        if a.run_id:
+            artifacts_by_run.setdefault(a.run_id, []).append(a)
+    ver_by_run = {v.get("run_id"): v for v in verifications if v.get("run_id")}
+    for variant in spec["variants"]:
+        for condition in spec["conditions"]:
+            cell = f"{variant['variant_id']}×{condition['condition_id']}"
+            run = runs_by_cell.get((variant["variant_id"], condition["condition_id"]))
+            if run is None:
+                missing.append({"kind": "MISSING_RUN", "cell": cell})
+                continue
+            if run.execution_state != "SUCCEEDED":
+                missing.append(
+                    {
+                        "kind": "RUN_NOT_SUCCEEDED",
+                        "cell": cell,
+                        "run_id": run.run_id,
+                        "execution_state": run.execution_state,
+                    }
+                )
+            arts = artifacts_by_run.get(run.run_id, [])
+            if not any("report" in a.logical_path for a in arts):
+                missing.append({"kind": "MISSING_RAW_REPORT", "cell": cell, "run_id": run.run_id})
+            if run.run_id not in ver_by_run:
+                missing.append({"kind": "MISSING_VERIFICATION", "cell": cell, "run_id": run.run_id})
+    return {"complete": not missing, "missing": missing}
+
+
+__all__ = [
+    "build_bundle",
+    "bundle_evidence_mode",
+    "compute_completeness",
+    "compute_completeness_manifest",
+    "manifest_snapshot",
+    "verify_bundle_integrity",
+]
