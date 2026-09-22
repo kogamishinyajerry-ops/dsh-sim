@@ -1,6 +1,6 @@
 # dsh-sim — DSH 工业仿真智能体（R0 首版）
 
-![tests](https://img.shields.io/badge/tests-150%20passed-brightgreen) ![coverage](https://img.shields.io/badge/coverage-86%25-green) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
+![tests](https://img.shields.io/badge/tests-293%20passed-brightgreen) ![coverage](https://img.shields.io/badge/coverage-86%25-green) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > 面向 STAR-CCM+ 等 CAE 求解器的**可信仿真智能体工程服务**：五维状态机 + 人工审批门 + 证据链哈希冻结 + MCP 工具接口 + 双工作台 UI。核心设计原则——**智能体永远拿不到授权与接受权**；MOCK/REAL 数据严格分色；未知状态醒目标注，拒绝"单绿勾"。
 >
@@ -8,7 +8,7 @@
 
 ## 一句话现状
 
-工程服务 + 12 MCP 工具 + 双工作台 + Mock 端到端闭环**已实现并 147 项测试全绿**；真实 STAR-CCM+ 探针 5/9 通过（限定）；**任何"工程通过/接受"当前都不可达成**——能力包为 DRAFT（阈值 TBD），这是设计使然，不是缺陷。
+工程服务 + 12 MCP 工具 + 双工作台 + Mock 端到端闭环**已实现并 293 项测试全绿**；真实 STAR-CCM+ 探针 5/9 通过（限定）；**任何"工程通过/接受"当前都不可达成**——能力包为 DRAFT（阈值 TBD），这是设计使然，不是缺陷。
 
 ## 运行
 
@@ -34,6 +34,30 @@ export DSH_SIM_IDENTITY_MODE=dev        # PowerShell: $env:DSH_SIM_IDENTITY_MODE
 - 其它一切取值（含未设置、空值、无法识别）→ **生产模式：拒绝全部自报身份头（401）**。
   生产用户主体与权限必须来自受信身份提供方（TBD-08），未完成前不接受任何自报身份，
   界面角色下拉框不是安全边界。
+
+## 外部资源（wheel 安装必须显式配置）
+
+`capabilities/` 与 `panels/` 位于**仓库根目录**，不在 Python 包内。运行时按
+「环境变量 → 仓库布局 → 安装后位置 `<sys.prefix>/share/dsh-sim/`」解析，
+由 `dsh_sim.resources` 统一负责：
+
+| 变量 | 作用 | 源码运行时默认 |
+|---|---|---|
+| `DSH_SIM_CAPABILITIES_ROOT` | 能力包根（rules/metrics/domain） | 仓库 `capabilities/` |
+| `DSH_SIM_PANELS_ROOT` | 面板静态资源根 | 仓库 `panels/` |
+| `DSH_SIM_STATE_DIR` | 运行状态目录（库/工件/Worker 工作区） | 仓库 `var/`；安装后 `~/.dsh-sim` |
+| `DSH_SIM_ALLOW_MISSING_RESOURCES` | =1 时才允许缺资源启动（必然留痕告警） | 未设置（缺资源即拒绝启动） |
+
+**缺资源时启动直接失败**（不再静默挂空面板/注册空能力包），错误里给出已尝试的位置
+与要设置的变量名；`app.state.resource_status` 可复现实际解析来源。
+
+wheel 验收（报告要求「构建后必须在干净目录安装测试」）：
+
+```bash
+<PYTHON_ENV>\Scripts\python.exe scripts/verify_wheel_install.py
+# 构建 wheel → 装进干净目录 → 断言 import 的是安装产物（非仓库 src）
+# → 未配置资源必须 fail-fast、显式配置后必须启动成功（10 项逐条 PASS/FAIL）
+```
 
 ## 状态墙
 

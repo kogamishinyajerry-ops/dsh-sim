@@ -17,17 +17,25 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from dsh_sim.db.models import Base
+from dsh_sim.resources import state_dir
 
 ENV_DATABASE_URL = "DSH_SIM_DATABASE_URL"
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[3] / "var" / "dsh_sim.db"
+
+
+def default_db_path() -> Path:
+    """默认开发库路径：仓库 `var/`（源码运行）或用户状态目录（安装后）。
+
+    报告 §五：旧实现用 `Path(__file__).parents[3]` 推算仓库根，wheel 安装后
+    会落到 site-packages 上层（既非预期位置，也不该往那里写）。
+    """
+    return state_dir() / "dsh_sim.db"
 
 
 def database_url() -> str:
     url = os.environ.get(ENV_DATABASE_URL)
     if url:
         return url
-    DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{DEFAULT_DB_PATH.as_posix()}"
+    return f"sqlite:///{default_db_path().as_posix()}"
 
 
 def make_engine(url: str | None = None) -> Engine:

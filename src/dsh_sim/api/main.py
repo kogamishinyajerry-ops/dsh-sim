@@ -19,13 +19,16 @@ from fastapi.staticfiles import StaticFiles
 from dsh_sim.api.deps import IDENTITY_MODE_ENV, PROD, resolve_identity_mode
 from dsh_sim.db.session import init_db, make_engine, make_session_factory
 from dsh_sim.domain.errors import ApiError, ErrorCode
+from dsh_sim.resources import (
+    ENV_ALLOW_MISSING_RESOURCES,
+    MissingResourceError,
+    allow_missing_resources,
+    resolve_capabilities,
+    resolve_panels,
+    state_dir,
+)
 
 logger = logging.getLogger("dsh_sim.api")
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-PANELS_DIR = REPO_ROOT / "panels"
-DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "var" / "artifacts"
-DEFAULT_CAPABILITIES_ROOT = REPO_ROOT / "capabilities"
 
 
 def create_app(
@@ -45,7 +48,7 @@ def create_app(
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.artifact_root = Path(
-        artifact_root or os.environ.get("DSH_SIM_ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT
+        artifact_root or os.environ.get("DSH_SIM_ARTIFACT_ROOT") or (state_dir() / "artifacts")
     )
     app.state.identity_mode = resolve_identity_mode(
         identity_mode if identity_mode is not None else os.environ.get(IDENTITY_MODE_ENV)
@@ -107,22 +110,64 @@ def create_app(
     app.include_router(projections.router, prefix="/api/v1", tags=["projections"])
     app.include_router(verifications.router, prefix="/api/v1", tags=["verifications"])
 
-    # /panels 静态挂载：目录可能为空或不存在，容忍（Agent F 后续填充）
-    if PANELS_DIR.is_dir():
-        app.mount("/panels", StaticFiles(directory=PANELS_DIR), name="panels")
+    # ------------------------------------------------------------------
+    # 外部资源解析与启动检查（上游验收报告 §五：明确外置配置，缺资源必须暴露，
+    # 不能像旧实现那样把 site-packages 当仓库根、静默地挂空面板/注册空能力包）。
+    # ------------------------------------------------------------------
+    missing: list[MissingResourceError] = []
+    cap_res = resolve_capabilities()
+    panel_res = resolve_panels()
+    if not cap_res.found:
+        missing.append(
+            MissingResourceError(
+                "capabilities",
+                env_var=cap_res.env_var,
+                tried=cap_res.tried,
+                hint="能力包 rules/metrics/domain 是数值校核与证据冻结的输入。",
+            )
+        )
+    if not panel_res.found:
+        missing.append(
+            MissingResourceError(
+                "panels",
+                env_var=panel_res.env_var,
+                tried=panel_res.tried,
+                hint="执行台/审查台面板由工程 API 静态挂载在 /panels 下。",
+            )
+        )
+    if missing and not allow_missing_resources():
+        # fail-fast：缺资源时拒绝启动，错误里带已尝试位置与可执行的修复动作
+        raise RuntimeError("\n\n".join(str(exc) for exc in missing))
+    if missing:
+        for exc in missing:
+            logger.error("资源缺失但已按 %s 降级启动：%s", ENV_ALLOW_MISSING_RESOURCES, exc)
+    for res in (cap_res, panel_res):
+        logger.warning(
+            "外部资源 %s → %s（来源 %s）",
+            res.name,
+            res.path if res.found else "<缺失>",
+            res.source,
+        )
+
+    # /panels 静态挂载
+    if panel_res.path is not None:
+        app.mount("/panels", StaticFiles(directory=panel_res.path), name="panels")
 
     # WP-17：启动时扫描 capabilities/ 注册能力包（只注册为 DRAFT；
     # RELEASED 必须来自人工发布流程，注册器内置安全网降级）。
-    caps_root = Path(
-        os.environ.get("DSH_SIM_CAPABILITIES_ROOT") or DEFAULT_CAPABILITIES_ROOT
-    )
-    if caps_root.is_dir():
+    if cap_res.path is not None:
         from dsh_sim.capabilities import register_capabilities
 
         with app.state.session_factory() as s:
-            app.state.capability_scan = register_capabilities(s, caps_root)
+            app.state.capability_scan = register_capabilities(s, cap_res.path)
     else:
         app.state.capability_scan = []
+
+    app.state.resource_status = {
+        "capabilities": cap_res.as_dict(),
+        "panels": panel_res.as_dict(),
+        "missing": [res.name for res in (cap_res, panel_res) if not res.found],
+    }
 
     return app
 

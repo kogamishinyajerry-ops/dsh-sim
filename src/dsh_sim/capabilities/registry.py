@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from dsh_sim.canonical import canonical_dumps, sha256_hex
 from dsh_sim.db.models import CapabilityPackageRow
+from dsh_sim.resources import capabilities_root
 
 REQUIRED_MANIFEST_FIELDS = ("capability_package_id", "version", "status")
 VALID_STATUSES = {"DRAFT", "RELEASED", "RETIRED", "INVALID"}
@@ -227,7 +227,8 @@ def resolve_method_package(
 
 
 def _default_root() -> Path:
-    return Path(
-        os.environ.get("DSH_SIM_CAPABILITIES_ROOT")
-        or (Path(__file__).resolve().parents[3] / "capabilities")
-    )
+    """能力包根：统一走外部资源解析（显式 env → 仓库布局 → 安装后位置）。
+
+    报告 §五：旧实现直接用 `parents[3]`，wheel 安装后会静默取不到资源。
+    """
+    return capabilities_root()

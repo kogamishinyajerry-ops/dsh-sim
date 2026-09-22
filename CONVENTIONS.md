@@ -125,3 +125,9 @@ HTTP 映射：401 未认证 / 403 越权 / 409 摘要·修订·幂等冲突 / 42
 ```
 
 端口约定：工程 API **8600**（避开 dsh 3080）；panels 由 API 静态挂载 `/panels/executor`、`/panels/reviewer`。
+
+外部资源（报告 §五）：`capabilities/`、`panels/` 在仓库根、不在包内，运行时由
+`dsh_sim.resources` 按「env → 仓库布局 → `<sys.prefix>/share/dsh-sim/`」解析；
+**缺资源启动即失败**（不是静默空列表）。源码运行无需配置；wheel 部署必须显式设置
+`DSH_SIM_CAPABILITIES_ROOT` / `DSH_SIM_PANELS_ROOT` / `DSH_SIM_STATE_DIR`。
+安装产物验收：`python scripts/verify_wheel_install.py`。

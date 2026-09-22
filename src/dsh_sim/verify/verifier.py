@@ -24,8 +24,7 @@ from dsh_sim.db.models import RunRow, VerificationRow
 from dsh_sim.domain.states import ApplicabilityState, NumericalState, can_transition
 from dsh_sim.verify.extract import ExtractedMetrics
 
-ENV_CAPABILITIES_ROOT = "DSH_SIM_CAPABILITIES_ROOT"
-DEFAULT_CAPABILITIES_ROOT = Path(__file__).resolve().parents[3] / "capabilities"
+from dsh_sim import resources as _resources
 
 # rules.json 中会被视为"阈值"的字段（任一非 None 即视为已冻结可判定）
 _THRESHOLD_KEYS = (
@@ -47,7 +46,11 @@ class VerificationResult:
 
 
 def capabilities_root() -> Path:
-    return Path(os.environ.get(ENV_CAPABILITIES_ROOT) or DEFAULT_CAPABILITIES_ROOT)
+    """能力包根（委托 `dsh_sim.resources`：显式 env → 仓库布局 → 安装后位置）。
+
+    报告 §五：旧实现用 `parents[3]` 推算仓库根，wheel 安装后静默取不到资源。
+    """
+    return _resources.capabilities_root()
 
 
 def load_rule_set(package_id: str, version: str) -> tuple[dict[str, Any], str]:

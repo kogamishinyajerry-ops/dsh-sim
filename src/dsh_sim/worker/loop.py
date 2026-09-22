@@ -53,6 +53,7 @@ from dsh_sim.verify.verifier import (
     persist_verification,
     verify_run,
 )
+from dsh_sim.resources import state_dir
 from dsh_sim.worker.wal import JsonlWal
 
 # ---------------------------------------------------------------------------
@@ -76,13 +77,21 @@ class WorkerConfig:
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "WorkerConfig":
-        root = repo_root or Path(__file__).resolve().parents[3]
+        """默认工作/工件目录。
+
+        `repo_root` 显式给出时保持历史语义（`<repo_root>/var/{worker,artifacts}`）；
+        否则走状态目录解析（仓库 `var/` 或安装后的用户状态目录），不再用
+        `parents[3]` 推算仓库根——wheel 安装后那会落到 site-packages 上层
+        （上游验收报告 §五）。
+        """
+        if repo_root is not None:
+            base = repo_root / "var"
+        else:
+            base = state_dir()
         return cls(
             node_id=os.environ.get(ENV_NODE_ID, f"node-{uuid.uuid4().hex[:8]}"),
-            work_root=Path(os.environ.get(ENV_WORK_DIR, str(root / "var" / "worker"))),
-            artifact_root=Path(
-                os.environ.get(ENV_ARTIFACT_ROOT, str(root / "var" / "artifacts"))
-            ),
+            work_root=Path(os.environ.get(ENV_WORK_DIR, str(base / "worker"))),
+            artifact_root=Path(os.environ.get(ENV_ARTIFACT_ROOT, str(base / "artifacts"))),
             max_jobs=(
                 int(os.environ[ENV_MAX_JOBS]) if os.environ.get(ENV_MAX_JOBS) else None
             ),

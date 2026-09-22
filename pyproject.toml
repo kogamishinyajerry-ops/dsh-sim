@@ -26,6 +26,11 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "coverage>=7.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# 包内非 .py 资源必须显式声明，否则 wheel 里没有它们（上游验收报告 §五：
+# 旧产物 55 个文件全是 .py，报告模板 / 规则 / 面板完全缺失）。
+[tool.setuptools.package-data]
+dsh_sim = ["evidence/templates/*.j2"]
+
 [tool.pytest.ini_options]
 markers = [
     "mock: Mock 层测试（默认全绿线，不需真实软件/网络）",

@@ -8,18 +8,30 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
+from importlib.resources import files
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import DictLoader, Environment, select_autoescape
 from sqlalchemy.orm import Session
 
 from dsh_sim.db.models import ClaimRow, RunRow, TaskRevisionRow, TaskRow
 
-_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+#: 报告模板随包分发（pyproject `[tool.setuptools.package-data]`）。
+#: 用 importlib.resources 定位而不是 `Path(__file__).parent`，这样 wheel / zip
+#: 安装下同样取得到（上游验收报告 §五：不能靠源码路径推算资源位置）。
+_TEMPLATE_PACKAGE = "dsh_sim.evidence"
+_TEMPLATE_DIRNAME = "templates"
+_TEMPLATE_NAME = "report.html.j2"
+
+
+def _load_template_text(name: str = _TEMPLATE_NAME) -> str:
+    resource = files(_TEMPLATE_PACKAGE).joinpath(_TEMPLATE_DIRNAME, name)
+    return resource.read_text(encoding="utf-8")
+
 
 _env = Environment(
-    loader=FileSystemLoader(str(_TEMPLATE_DIR)),
+    # 模板由维护者随包提供（不可信模板不进渲染路径），故在导入期一次性读入。
+    loader=DictLoader({_TEMPLATE_NAME: _load_template_text()}),
     autoescape=select_autoescape(["html", "j2"]),
     trim_blocks=True,
     lstrip_blocks=True,
