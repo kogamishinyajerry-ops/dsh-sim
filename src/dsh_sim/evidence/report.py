@@ -38,6 +38,7 @@ def render_report(
     evidence_mode: str,
     completeness: dict[str, Any],
     manifest: list[dict[str, Any]],
+    method_package: dict[str, Any] | None = None,
 ) -> str:
     spec = rev.spec
     method = spec.get("method") or {}
@@ -52,6 +53,7 @@ def render_report(
         purpose=task.purpose,
         review_scope=method.get("review_scope", ""),
         capability_package_id=method.get("capability_package_id", ""),
+        method_package=method_package or {},
         evidence_mode=evidence_mode,
         is_mock=evidence_mode == "MOCK",
         # MOCK 水印重复网格（确定性 4×6，不依赖随机/时间）

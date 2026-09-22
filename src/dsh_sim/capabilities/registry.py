@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -116,3 +118,116 @@ def register_capabilities(session: Session, root: Path) -> list[dict[str, Any]]:
         out.append(rec)
     session.commit()
     return out
+
+
+@dataclass(frozen=True)
+class ResolvedMethodPackage:
+    """TaskSpec.method 的精确解析结果（上游报告问题 2 验收条件 1）。
+
+    TaskSpec 契约（contracts/task-spec.schema.json#/$defs/method）声明
+    capability_package_id + capability_package_sha256（摘要，不是版本号）。
+    版本与发布状态只能由该摘要反查得到——这就是"精确解析"的含义。
+    """
+
+    capability_package_id: str
+    version: str
+    status: str
+    manifest: dict[str, Any]
+    manifest_sha256: str
+    declared_sha256: str
+    digest_match: bool
+    released: bool
+    source_dir: Path
+
+
+def resolve_method_package(
+    session: Session | None,
+    method: dict[str, Any] | None,
+    *,
+    capabilities_root: Path | None = None,
+) -> ResolvedMethodPackage:
+    """按 TaskSpec.method 声明的包标识 + 摘要精确解析（问题 2 验收条件 1）。
+
+    解析顺序（摘要优先，绝不静默回退到某个"当前版本"）：
+    1. 磁盘扫描该包全部版本，取 manifest 摘要 == spec 声明摘要的版本（digest_match=True）；
+    2. 摘要无命中时退回注册表最新版本（digest_match=False，如实记录差异）；
+    3. 该包完全不存在 → ApiError(BLOCKED)：方法包与 spec 不符时不构建包，
+       不允许默认 0.1.0 静默顶替（问题 2：「不能静默替换规则」）。
+    """
+    from dsh_sim.domain.errors import ApiError, ErrorCode
+
+    method = method or {}
+    pkg_id = method.get("capability_package_id")
+    declared = str(method.get("capability_package_sha256") or "")
+    if not pkg_id:
+        raise ApiError(
+            ErrorCode.VALIDATION,
+            "TaskSpec.method 缺 capability_package_id，无法解析方法包",
+            details={"method": method},
+        )
+    root = capabilities_root or _default_root()
+    # 磁盘为登记源（status 已含 RELEASED 需人工审批的降级规则、manifest_sha256 计算）
+    records = [
+        rec
+        for rec in scan_capabilities_root(root)
+        if rec["capability_package_id"] == pkg_id
+    ]
+    if not records:
+        raise ApiError(
+            ErrorCode.BLOCKED,
+            "能力包不存在：capabilities/ 下无该包任何版本，不能构建证据包",
+            retryable=False,
+            details={"capability_package_id": pkg_id, "declared_sha256": declared},
+        )
+
+    matched = next((r for r in records if r.get("manifest_sha256") == declared), None)
+    if matched is None and session is not None and declared:
+        row = (
+            session.query(CapabilityPackageRow)
+            .filter_by(capability_package_id=pkg_id, manifest_sha256=declared)
+            .first()
+        )
+        if row is not None:
+            matched = next(
+                (r for r in records if r["version"] == row.version), None
+            )
+    digest_match = matched is not None
+    rec = matched or sorted(records, key=lambda r: r["version"])[-1]
+
+    version = rec["version"]
+    mpath = root / pkg_id / version / "manifest.json"
+    if not mpath.is_file():
+        raise ApiError(
+            ErrorCode.BLOCKED,
+            "能力包 manifest 不可读，不能构建证据包",
+            retryable=False,
+            details={"capability_package_id": pkg_id, "version": version},
+        )
+    try:
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApiError(
+            ErrorCode.BLOCKED,
+            f"能力包 manifest 不可解析: {exc}",
+            retryable=False,
+            details={"capability_package_id": pkg_id, "version": version},
+        ) from exc
+
+    return ResolvedMethodPackage(
+        capability_package_id=pkg_id,
+        version=version,
+        status=rec.get("status", "INVALID"),
+        manifest=manifest,
+        manifest_sha256=rec.get("manifest_sha256") or "",
+        declared_sha256=declared,
+        digest_match=digest_match,
+        released=rec.get("status") == "RELEASED",
+        source_dir=root / pkg_id / version,
+    )
+
+
+def _default_root() -> Path:
+    return Path(
+        os.environ.get("DSH_SIM_CAPABILITIES_ROOT")
+        or (Path(__file__).resolve().parents[3] / "capabilities")
+    )

@@ -159,6 +159,14 @@ class TestReport:
             rev = s.query(TaskRevisionRow).filter_by(task_id=chain.task_id, revision=1).first()
             runs = s.query(RunRow).filter_by(task_id=chain.task_id, revision=1).all()
             claims = s.query(ClaimRow).filter_by(bundle_id=row.bundle_id).all()
+            # 方法包信息是冻结事实：从 summary 产物读回，证明渲染可由冻结数据复现
+            from dsh_sim.db.models import ArtifactRow
+
+            summary_entry = next(e for e in row.manifest if e["role"] == "summary")
+            summary_art = s.get(ArtifactRow, summary_entry["artifact_id"])
+            summary = json.loads(
+                Path(summary_art.storage_path).read_text(encoding="utf-8").split("\n", 1)[-1]
+            )
             html2 = render_report(
                 s,
                 bundle_id=row.bundle_id,
@@ -170,6 +178,7 @@ class TestReport:
                 evidence_mode="MOCK",
                 completeness=compute_completeness(s, chain.task_id, 1),
                 manifest=row.manifest[:-1],
+                method_package=summary["method_package"],
             )
             assert html1 == html2
         finally:
