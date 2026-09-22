@@ -15,12 +15,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from dsh_sim.db.models import (
+    ArtifactRow,
     BundleRow,
     DecisionRow,
     ReviewIssueRow,
     ReviewRow,
+    RunRow,
+    VerificationRow,
 )
 from dsh_sim.evidence.bundle import compute_completeness
+from dsh_sim.review.acceptance import run_acceptance_blockers
 
 
 def bundle_blockers(session: Session, review: ReviewRow) -> dict[str, Any]:
@@ -38,6 +42,40 @@ def bundle_blockers(session: Session, review: ReviewRow) -> dict[str, Any]:
     completeness = compute_completeness(session, review.task_id, review.revision)
     if not completeness["complete"]:
         problems["bundle_incomplete"] = completeness["missing"]
+    # Positive gates: NOT_CHECKED, OUT_OF_SCOPE, UNKNOWN and previous-attempt
+    # evidence cannot slip through the legacy negative-state checks.
+    runs = session.query(RunRow).filter_by(
+        task_id=review.task_id, revision=review.revision
+    ).all()
+    run_ids = [run.run_id for run in runs]
+    artifacts = session.query(ArtifactRow).filter(
+        ArtifactRow.run_id.in_(run_ids)
+    ).all() if run_ids else []
+    checks = session.query(VerificationRow).filter(
+        VerificationRow.run_id.in_(run_ids)
+    ).all() if run_ids else []
+    problems.update(run_acceptance_blockers(
+        [
+            {name: getattr(run, name) for name in (
+                "run_id", "current_attempt_id", "execution_state",
+                "numerical_state", "applicability_state",
+            )}
+            for run in runs
+        ],
+        [
+            {name: getattr(art, name) for name in (
+                "artifact_id", "run_id", "attempt_id", "state", "evidence_mode",
+            )}
+            for art in artifacts
+        ],
+        [
+            {name: getattr(check, name) for name in (
+                "verification_id", "run_id", "attempt_id", "conclusion",
+                "source_artifact_ids",
+            )}
+            for check in checks
+        ],
+    ))
     drafts = (
         session.query(ReviewIssueRow)
         .filter(
