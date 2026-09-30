@@ -1,0 +1,23 @@
+{
+  "capability_package_id": "openfoam_channel",
+  "version": "0.1.0",
+  "name": "Public OpenFOAM laminar-channel integration experiment",
+  "purpose": "design_screening",
+  "status": "DRAFT",
+  "validation_only": true,
+  "description": "Real solver integration and evidence validation; engineering thresholds and method release remain unapproved.",
+  "compatibility": {
+    "solver_family": "OpenFOAM",
+    "tested_distribution": "OpenCFD v1912, Ubuntu 1912.200626-2build3, serial Linux",
+    "adapter": "dsh_sim.adapters.openfoam_adapter.OpenFoamAdapter",
+    "dsh_baseline": "0.2.0-rc.2",
+    "production_compatibility": "UNCONFIRMED"
+  },
+  "content_sha256": {
+    "README.md": "6daeadbef5cd6086513cbea51395755d493619329517531e1d5eff23ca3f7823",
+    "approval.json": "288e84625812ef19bcfc8acc297b0cb2f49a076f785b7cd320f92ebfcd5e7d40",
+    "domain.json": "2a949193bcfa5ac535df164cd12c97b4bb81da01c3742af3b2639d6ad72bb2cc",
+    "metric-definitions.json": "e9134fde6188b13675701787daa6ffe7ec2a59a5f924bd676f32d9fa2e451fde",
+    "rules.json": "30b585b85b8e929bb8c301e4ae116fe2ed65520076317902c0f2ccf2301fc92d"
+  }
+}

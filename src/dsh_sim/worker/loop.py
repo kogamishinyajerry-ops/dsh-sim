@@ -21,16 +21,20 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
+import math
 import os
+import time
 import uuid
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import asdict, dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from dsh_sim.adapters.star_adapter import ExecutionBudget, StarAdapter
-from dsh_sim.canonical import canonical_dumps, sha256_hex
+from dsh_sim.adapters.star_adapter import CollectedOutputs, ExecutionBudget, JobHandle, JobStatus, StarAdapter
+from dsh_sim.canonical import canonical_dumps, prepared_digest, sha256_hex
+from dsh_sim.capabilities.registry import resolve_method_package
 from dsh_sim.db.models import (
     ArtifactRow,
     AuthorizationRow,
@@ -63,6 +67,7 @@ ENV_NODE_ID = "DSH_SIM_WORKER_NODE_ID"
 ENV_WORK_DIR = "DSH_SIM_WORKER_WORK_DIR"
 ENV_MAX_JOBS = "DSH_SIM_WORKER_MAX_JOBS"
 ENV_MAX_POLLS = "DSH_SIM_WORKER_MAX_POLLS"
+ENV_POLL_INTERVAL = "DSH_SIM_WORKER_POLL_INTERVAL_SECONDS"
 ENV_ARTIFACT_ROOT = "DSH_SIM_ARTIFACT_ROOT"
 
 
@@ -72,7 +77,17 @@ class WorkerConfig:
     work_root: Path
     artifact_root: Path
     max_jobs: int | None = None  # None = 不限；测试用小值防死循环
-    max_polls: int = 32  # poll 异常保护上限（hang 行为只应被 cancel 终结）
+    max_polls: int | None = None  # REAL 默认由批准的墙钟预算限时；MOCK 默认保护 32 次
+    poll_interval_seconds: float | None = None  # None: REAL 1s / MOCK 0s
+
+    def __post_init__(self) -> None:
+        if self.max_polls is not None and self.max_polls < 1:
+            raise ValueError("max_polls 必须为正整数或 None")
+        if self.poll_interval_seconds is not None and (
+            not math.isfinite(self.poll_interval_seconds)
+            or not 0 <= self.poll_interval_seconds <= queue_service.HEARTBEAT_INTERVAL_SECONDS
+        ):
+            raise ValueError("poll_interval_seconds 必须在 0 到心跳间隔之间")
 
     @classmethod
     def from_env(cls, repo_root: Path | None = None) -> "WorkerConfig":
@@ -86,12 +101,15 @@ class WorkerConfig:
             max_jobs=(
                 int(os.environ[ENV_MAX_JOBS]) if os.environ.get(ENV_MAX_JOBS) else None
             ),
-            max_polls=int(os.environ.get(ENV_MAX_POLLS, "32")),
+            max_polls=int(os.environ[ENV_MAX_POLLS]) if os.environ.get(ENV_MAX_POLLS) else None,
+            poll_interval_seconds=(
+                float(os.environ[ENV_POLL_INTERVAL]) if os.environ.get(ENV_POLL_INTERVAL) else None
+            ),
         )
 
 
 def make_adapter_from_env() -> StarAdapter:
-    """DSH_SIM_WORKER_ADAPTER=mock（默认，离线开发）| cli（真实支，需探针解锁）。"""
+    """显式选择 mock / cli / openfoam；没有真实环境时不回退 MOCK。"""
     kind = os.environ.get("DSH_SIM_WORKER_ADAPTER", "mock")
     if kind == "mock":
         from dsh_sim.adapters.mock_adapter import MockStarAdapter
@@ -103,7 +121,15 @@ def make_adapter_from_env() -> StarAdapter:
         from dsh_sim.adapters.cli_adapter import StarCliAdapter
 
         return StarCliAdapter()
-    raise ValueError(f"未知 DSH_SIM_WORKER_ADAPTER: {kind!r}（只允许 mock/cli）")
+    if kind == "openfoam":
+        from dsh_sim.adapters.openfoam_adapter import OpenFoamAdapter
+
+        required = ("DSH_SIM_OPENFOAM_TEMPLATE_REGISTRY", "DSH_SIM_OPENFOAM_TEMPLATE_ROOT", ENV_WORK_DIR)
+        missing = [name for name in required if not os.environ.get(name)]
+        if missing:
+            raise ValueError(f"OpenFOAM 需要显式模板注册与受控目录配置: {', '.join(missing)}")
+        return OpenFoamAdapter()
+    raise ValueError(f"未知 DSH_SIM_WORKER_ADAPTER: {kind!r}（只允许 mock/cli/openfoam）")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +143,10 @@ class _EventChannel:
         self._wal = wal
         self.job = job
         self.lease = lease
+        # 事务失败会 expire/detach ORM 对象；WAL 身份不能依赖随后懒加载。
+        self._job_id = job.job_id
+        self._lease_id = lease.lease_id
+        self._fencing_token = lease.fencing_token
         last = (
             session.query(EventRow.event_seq)
             .filter(EventRow.job_id == job.job_id)
@@ -128,24 +158,24 @@ class _EventChannel:
     def post(self, kind: str, payload: dict[str, Any]) -> int:
         seq = next(self._seq)
         self._wal.append(
-            job_id=self.job.job_id,
-            lease_id=self.lease.lease_id,
-            fencing_token=self.lease.fencing_token,
+            job_id=self._job_id,
+            lease_id=self._lease_id,
+            fencing_token=self._fencing_token,
             event_seq=seq,
             kind=kind,
             payload=payload,
         )
         queue_service.post_event(
             self._session,
-            job_id=self.job.job_id,
-            lease_id=self.lease.lease_id,
-            fencing_token=self.lease.fencing_token,
+            job_id=self._job_id,
+            lease_id=self._lease_id,
+            fencing_token=self._fencing_token,
             event_seq=seq,
             kind=kind,
             payload=payload,
         )
         self._session.commit()  # 事件增量持久化：断线后重进可见相同状态（FR-11）
-        self._wal.mark_acked(self.job.job_id, seq)
+        self._wal.mark_acked(self._job_id, seq)
         return seq
 
 
@@ -218,9 +248,12 @@ def _commit_artifact(
     evidence_mode: str,
     run_id: str | None = None,
     attempt_id: str | None = None,
+    expected_sha256: str | None = None,
 ) -> ArtifactRow:
     content = src_path.read_bytes()
     sha = hashlib.sha256(content).hexdigest()
+    if expected_sha256 is not None and sha != expected_sha256:
+        raise ValueError(f"产物摘要核验失败: {logical_path}")
     artifact_id = f"art_{uuid.uuid4().hex[:24]}"
     dest_dir = artifact_root / project_id
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -300,14 +333,29 @@ def _do_prepare(
     )
     spec = rev.spec
     prep = _latest_preparation(session, task.task_id, task.current_revision)
-    probe = adapter.probe_environment()
-
     channel.post(
         "STARTING",
         {
             "preparation_id": prep.preparation_id,
+            "revision": prep.revision,
             "launch_intent_id": f"intent-{job.job_id}",
             "work_dir_summary": sha256_hex(str(config.work_root / task.task_id))[:16],
+            "stage": "environment_probe",
+        },
+    )
+    # 外部调用期间不持 SQLite BEGIN IMMEDIATE 锁，取消与查看进度应可并行。
+    session.commit()
+    probe = adapter.probe_environment()
+    if probe.evidence_mode not in {"MOCK", "REAL"}:
+        raise ValueError("适配器未声明有效 evidence_mode")
+    if probe.evidence_mode == "REAL":
+        _resolve_execution_method(session, spec, probe.evidence_mode)
+    channel.post(
+        "RUNNING",
+        {
+            "process_identity": {"worker_node_id": config.node_id, "operation": "prepare"},
+            "software_build": probe.star_build,
+            "stage": "prepare_and_readback",
             "evidence_mode": probe.evidence_mode,
         },
     )
@@ -326,19 +374,32 @@ def _do_prepare(
                 config.work_root
                 / task.task_id
                 / "prepare"
+                / f"revision-{prep.revision}"
+                / prep.preparation_id
                 / variant["variant_id"]
                 / condition["condition_id"]
             )
+            session.commit()
+            if probe.evidence_mode == "REAL":
+                inspection = adapter.inspect_template(variant["template_artifact_id"])
+                if (inspection.evidence_mode != "REAL"
+                    or inspection.mesh_summary.get("boundary_map_sha256") != variant["boundary_map_sha256"]):
+                    raise ValueError("REAL 模板的边界映射摘要缺失或与 TaskSpec 不一致")
             case = adapter.prepare_case(
                 template_ref=variant["template_artifact_id"],
                 whitelist_writes=_whitelist_writes(condition),
                 work_dir=str(cell_dir),
             )
             readback = adapter.read_actual_settings(case.prepared_sim_path)
+            if case.evidence_mode != probe.evidence_mode or readback.evidence_mode != probe.evidence_mode:
+                raise ValueError("准备/回读 evidence_mode 与探针不一致")
+            if probe.evidence_mode == "REAL" and case.source_template_sha256 != variant["template_sha256"]:
+                raise ValueError("真实模板摘要与 TaskSpec 不一致，不使用其它模板顶替")
             readback_shas.append(readback.readback_sha)
 
             logical = (
-                f"prepared/{variant['variant_id']}/{condition['condition_id']}/"
+                f"prepared/{task.task_id}/revision-{prep.revision}/{prep.preparation_id}/"
+                f"{variant['variant_id']}/{condition['condition_id']}/"
                 + Path(case.prepared_sim_path).name
             )
             art = _commit_artifact(
@@ -349,6 +410,7 @@ def _do_prepare(
                 src_path=Path(case.prepared_sim_path),
                 artifact_root=config.artifact_root,
                 evidence_mode=case.evidence_mode,
+                expected_sha256=case.prepared_sha256,
             )
             artifact_ids.append(art.artifact_id)
             prepared_artifacts[logical] = case.prepared_sha256
@@ -372,15 +434,6 @@ def _do_prepare(
                         }
                     )
 
-    channel.post(
-        "RUNNING",
-        {
-            "process_identity": f"mock-prepare:{job.job_id}",
-            "software_build": probe.star_build,
-            "stage": "readback",
-        },
-    )
-
     # 语义 finding 也作为差异阻塞（不静默跳过）
     for f_ in semantic_findings:
         differences.append({"field": f_["kind"], "status": "MISMATCH", "requested": None, "readback": None, "unit": "", "boundary": "", "message": f_["message"]})
@@ -388,6 +441,20 @@ def _do_prepare(
     combined_readback_sha = sha256_hex(canonical_dumps(readback_shas))
     from dsh_sim.api.services.prep_service import mark_preparation_ready
 
+    session.refresh(task)
+    if task.current_revision != prep.revision:
+        raise ValueError("准备过程中任务已换修订，旧准备不标 READY")
+    session.refresh(job)
+    if job.cancel_requested:
+        session.commit()
+        channel.post("CANCELLED", {
+            "reason": "准备操作返回后确认取消，未启动 EXECUTE 求解进程",
+            "exit_proof": {"process_exited": True, "process_group_exited": True,
+                           "evidence": "prepare/readback returned; EXECUTE not launched"},
+            "exit_code": 130, "evidence_mode": probe.evidence_mode,
+            "artifact_ids": artifact_ids,
+        })
+        return
     mark_preparation_ready(
         session,
         prep.preparation_id,
@@ -425,256 +492,420 @@ def _do_prepare(
 # ---------------------------------------------------------------------------
 
 
-def _find_prepared_path(
-    session: Session,
-    prep: PreparationRow | None,
-    variant_id: str,
-    condition_id: str,
-) -> str | None:
+def _resolve_execution_method(session: Session, spec: dict[str, Any], mode: str):
+    """REAL 输入精确绑定磁盘方法包；旧 Mock 夹具的假摘要必须显式留痕。"""
+    resolved = resolve_method_package(session, spec.get("method"))
+    exact = resolved.digest_match and resolved.manifest_sha256 == resolved.declared_sha256
+    if mode == "REAL" and not exact:
+        raise ValueError("REAL 方法包摘要与 TaskSpec 不一致，停止执行；不回退当前版本")
+    return resolved
+
+
+def _find_prepared_artifact(
+    session: Session, prep: PreparationRow | None, variant_id: str, condition_id: str,
+) -> ArtifactRow | None:
+    """准备引用同时绑定任务、修订、准备作业、逻辑路径、摘要及真实文件。"""
     if prep is None:
         return None
-    for logical in prep.prepared_artifacts:
-        if f"/{variant_id}/{condition_id}/" in logical:
-            art = (
-                session.query(ArtifactRow)
-                .filter_by(logical_path=logical, state="COMMITTED")
-                .first()
+    task = session.get(TaskRow, prep.task_id)
+    rev = session.query(TaskRevisionRow).filter_by(task_id=prep.task_id, revision=prep.revision).first()
+    if task is None or rev is None or not prep.ready:
+        return None
+    digest = prepared_digest(rev.spec_sha256, prep.prepared_artifacts, prep.readback_sha256, prep.adapter_build)
+    if digest != prep.prepared_digest:
+        raise ValueError("准备摘要不符，拒绝替换或损坏的准备记录")
+    matches = []
+    for logical, expected_sha in prep.prepared_artifacts.items():
+        parts = PurePosixPath(logical).parts
+        if len(parts) < 3 or parts[-3:-1] != (variant_id, condition_id):
+            continue
+        candidates = (session.query(ArtifactRow).join(JobRow, ArtifactRow.job_id == JobRow.job_id)
+            .filter(ArtifactRow.project_id == task.project_id, ArtifactRow.logical_path == logical,
+                    ArtifactRow.sha256 == expected_sha, ArtifactRow.state == "COMMITTED",
+                    JobRow.task_id == prep.task_id, JobRow.kind == "PREPARE").all())
+        for art in candidates:
+            starts = session.query(EventRow).filter_by(job_id=art.job_id, kind="STARTING").all()
+            if not any((e.payload or {}).get("preparation_id") == prep.preparation_id for e in starts):
+                continue
+            path = Path(art.storage_path) if art.storage_path else None
+            if path is None or not path.is_file():
+                continue
+            content = path.read_bytes()
+            if len(content) != art.length or hashlib.sha256(content).hexdigest() != expected_sha:
+                raise ValueError("准备文件长度/摘要损坏，拒绝启动")
+            matches.append(art)
+    if len(matches) > 1:
+        raise ValueError("工况匹配多个准备 artifact，拒绝不明确的输入绑定")
+    return matches[0] if matches else None
+
+
+def _find_prepared_path(
+    session: Session, prep: PreparationRow | None, variant_id: str, condition_id: str,
+) -> str | None:
+    art = _find_prepared_artifact(session, prep, variant_id, condition_id)
+    return art.storage_path if art is not None else None
+
+
+def _output_path(work_dir: Path, logical: str, collected: CollectedOutputs) -> Path:
+    relative = PurePosixPath(logical)
+    if relative.is_absolute() or ".." in relative.parts or "\\" in logical:
+        raise ValueError(f"产物逻辑路径不受控: {logical}")
+    root = work_dir.resolve()
+    candidates = [root / logical]
+    declared = [*collected.raw_reports, *collected.monitors_csv, *collected.scenes]
+    if collected.result_sim:
+        declared.append(collected.result_sim)
+    candidates.extend(Path(p) for p in declared if Path(p).name == relative.name)
+    candidates.append(root / relative.name)  # 原有 STAR Mock 的 raw/name -> work/name 约定
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(root) and resolved.is_file():
+            return resolved
+    raise ValueError(f"产物未在本 attempt 工作目录内找到: {logical}")
+
+
+def _register_collected(
+    session: Session, config: WorkerConfig, collected: CollectedOutputs, handle: JobHandle,
+    *, project_id: str, job_id: str, run_id: str, attempt_id: str, mode: str,
+) -> tuple[list[str], ArtifactRow | None, ArtifactRow | None]:
+    if collected.run_id != run_id or collected.attempt_no != handle.attempt_no:
+        raise ValueError("收集产物 run/attempt 与启动句柄不一致")
+    if collected.evidence_mode != mode:
+        raise ValueError("产物 evidence_mode 与运行模式不一致")
+    report_paths = {Path(p).resolve() for p in collected.raw_reports}
+    monitor_paths = {Path(p).resolve() for p in collected.monitors_csv}
+    ids: list[str] = []
+    report_art = monitor_art = None
+    for logical, expected in collected.artifact_digests.items():
+        local = _output_path(Path(handle.work_dir), logical, collected)
+        full_logical = f"runs/{run_id}/attempt-{handle.attempt_no}/{logical}"
+        if hashlib.sha256(local.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"产物摘要核验失败: {logical}")
+        existing = session.query(ArtifactRow).filter_by(
+            project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+            logical_path=full_logical, sha256=expected, state="COMMITTED",
+        ).all()
+        if len(existing) > 1:
+            raise ValueError(f"产物登记存在歧义: {logical}")
+        if existing:
+            art = existing[0]
+            frozen = Path(art.storage_path).read_bytes() if art.storage_path else b""
+            if len(frozen) != art.length or hashlib.sha256(frozen).hexdigest() != expected or art.evidence_mode != mode:
+                raise ValueError(f"已冻结产物损坏或模式不符: {logical}")
+        else:
+            art = _commit_artifact(
+                session, project_id=project_id, job_id=job_id, logical_path=full_logical,
+                src_path=local, artifact_root=config.artifact_root, evidence_mode=mode,
+                run_id=run_id, attempt_id=attempt_id, expected_sha256=expected,
             )
-            if art is not None and art.storage_path and Path(art.storage_path).is_file():
-                return art.storage_path
-    return None
+        session.commit()  # 已取得的证据逐项保留，后续解析失败不能删除原始证据
+        ids.append(art.artifact_id)
+        if local in report_paths and local.name in {"report.csv", "report.mock.csv"}:
+            if report_art is not None:
+                raise ValueError("当前 attempt 存在多个规范报告 CSV")
+            report_art = art
+        if local in monitor_paths and local.name in {"monitor.csv", "monitor.mock.csv"}:
+            if monitor_art is not None:
+                raise ValueError("当前 attempt 存在多个规范监控 CSV")
+            monitor_art = art
+    return ids, report_art, monitor_art
+
+
+def _exit_confirmed(status: JobStatus, handle: JobHandle, mode: str) -> bool:
+    if status.job_id != handle.job_id or status.phase not in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+        return False
+    proof = status.detail.get("exit_proof")
+    if isinstance(proof, dict):
+        return (proof.get("process_exited") is True and proof.get("process_group_exited") is True
+                and (mode == "MOCK" or proof.get("process_identity") == handle.process_identity))
+    # 原有内存 Mock 协议的文字证明只在显式 MOCK 下兼容；REAL 不接受一句自然语言。
+    return (mode == "MOCK" and status.detail.get("evidence_mode") == "MOCK"
+            and isinstance(proof, str) and proof.lower().startswith("mock"))
+
+
+def _retain_failure_outputs(
+    session: Session, config: WorkerConfig, adapter: StarAdapter, handle: JobHandle | None,
+    work_dir: Path, *, project_id: str, job_id: str, run_id: str, attempt_id: str,
+    attempt_no: int, mode: str,
+) -> tuple[list[str], list[str]]:
+    ids: list[str] = []
+    errors: list[str] = []
+    session.commit()
+    if handle is not None:
+        try:
+            collected = adapter.collect_outputs(handle)
+            ids, _, _ = _register_collected(
+                session, config, collected, handle, project_id=project_id, job_id=job_id,
+                run_id=run_id, attempt_id=attempt_id, mode=mode,
+            )
+        except Exception as exc:
+            errors.append(f"collect_outputs: {type(exc).__name__}: {exc}")
+            session.rollback()
+            session.invalidate()  # 回收 SQLite 异常事务可能仍持有的保留锁
+    # 无完整清单时仍冻结现场已有日志/监督记录；这些是有时间边界的部分快照。
+    if errors or not ids:
+        root = work_dir.resolve()
+        for path in sorted(root.rglob("*")) if root.exists() else []:
+            if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root):
+                continue
+            if path.suffix not in {".log", ".json"}:
+                continue
+            try:
+                art = _commit_artifact(
+                    session, project_id=project_id, job_id=job_id,
+                    logical_path=f"runs/{run_id}/attempt-{attempt_no}/failure-snapshot/{path.relative_to(root).as_posix()}",
+                    src_path=path, artifact_root=config.artifact_root, evidence_mode=mode,
+                    run_id=run_id, attempt_id=attempt_id,
+                )
+                session.commit()
+                ids.append(art.artifact_id)
+            except Exception as exc:
+                errors.append(f"snapshot {path.name}: {type(exc).__name__}: {exc}")
+                session.rollback()
+                session.invalidate()
+    ids = sorted(set(ids) | {row.artifact_id for row in session.query(ArtifactRow).filter_by(
+        project_id=project_id, run_id=run_id, attempt_id=attempt_id, state="COMMITTED")})
+    session.commit()
+    return ids, errors
+
+
+def _finish_interrupted(
+    session: Session, channel: _EventChannel, config: WorkerConfig, adapter: StarAdapter,
+    handle: JobHandle | None, work_dir: Path, *, project_id: str, job_id: str,
+    run_id: str, attempt_id: str, attempt_no: int, mode: str, reason: str,
+    exit_code: int, requested_outcome: str = "FAILED", launch_attempted: bool = False,
+) -> None:
+    session.commit()  # adapter.cancel/collect 均不能跨阻塞操作持有数据库锁
+    stopped = handle is None and not launch_attempted
+    proof: Any = {"process_exited": True, "process_group_exited": True,
+                  "evidence": "launch was not invoked"} if stopped else None
+    cancellation_error = None
+    if handle is not None:
+        try:
+            status = adapter.cancel(handle)
+            stopped = _exit_confirmed(status, handle, mode)
+            proof = status.detail.get("exit_proof")
+            if not stopped:
+                cancellation_error = f"取消返回 {status.phase}，没有可核验的完整退出证据"
+        except Exception as exc:
+            cancellation_error = f"cancel: {type(exc).__name__}: {exc}"
+    ids, errors = _retain_failure_outputs(
+        session, config, adapter, handle, work_dir, project_id=project_id, job_id=job_id,
+        run_id=run_id, attempt_id=attempt_id, attempt_no=attempt_no, mode=mode,
+    )
+    payload = {
+        "reason": reason, "exit_code": exit_code, "exit_proof": proof,
+        "exit_unconfirmed": not stopped, "execution_state": requested_outcome if stopped else "LOST",
+        "evidence_mode": mode, "artifact_ids": ids, "partial_outputs": True,
+        "collection_errors": errors,
+    }
+    if cancellation_error:
+        payload["cancellation_error"] = cancellation_error
+    if handle is not None:
+        payload["process_identity"] = handle.process_identity
+    channel.post(requested_outcome if stopped else "FAILED", payload)
 
 
 def _do_execute(
-    session: Session,
-    job: JobRow,
-    channel: _EventChannel,
-    adapter: StarAdapter,
-    config: WorkerConfig,
+    session: Session, job: JobRow, channel: _EventChannel, adapter: StarAdapter, config: WorkerConfig,
 ) -> None:
     run = session.get(RunRow, job.run_id)
     attempt = session.get(AttemptRow, job.attempt_id)
     task = session.get(TaskRow, run.task_id)
-    rev = (
-        session.query(TaskRevisionRow)
-        .filter_by(task_id=task.task_id, revision=run.revision)
-        .first()
-    )
+    rev = session.query(TaskRevisionRow).filter_by(task_id=task.task_id, revision=run.revision).one()
     spec = rev.spec
-    probe = adapter.probe_environment()
-    mode = probe.evidence_mode
-    infix = ".mock" if mode == "MOCK" else ""
-
-    work_dir = config.work_root / run.run_id / f"attempt-{attempt.attempt_no}"
+    # 缓存标识，外部操作前结束事务，异常失效连接后也能保存现场。
+    job_id, run_id, attempt_id, attempt_no = job.job_id, run.run_id, attempt.attempt_id, attempt.attempt_no
+    project_id = task.project_id
+    work_dir = config.work_root / run_id / f"attempt-{attempt_no}"
     work_dir.mkdir(parents=True, exist_ok=True)
-
-    prep = (
-        session.query(PreparationRow)
-        .filter_by(task_id=task.task_id, revision=run.revision)
-        .order_by(PreparationRow.created_at.desc())
-        .first()
-    )
-    prepared_ref = _find_prepared_path(session, prep, run.variant_id, run.condition_id)
-    if prepared_ref is None:
-        channel.post(
-            "FAILED",
-            {"reason": "prepared 产物缺失（准备链未交付该工况），不补造", "exit_code": 70},
-        )
-        return
-
-    # 输入 staging：把 artifact 存储中的 prepared 副本复制进作业工作目录后启动，
-    # 产物全部落在本 attempt 工作目录（真实支同理：不就地改 artifact 存储）。
-    staged_prepared = work_dir / Path(prepared_ref).name
-    staged_prepared.write_bytes(Path(prepared_ref).read_bytes())
-
-    channel.post(
-        "STARTING",
-        {
-            "attempt_id": attempt.attempt_id,
-            "launch_intent_id": f"intent-{job.job_id}",
-            "work_dir_summary": sha256_hex(str(work_dir))[:16],
-            "prepared_ref_sha": hashlib.sha256(staged_prepared.read_bytes()).hexdigest(),
-            "evidence_mode": mode,
-        },
-    )
-
-    auth = (
-        session.query(AuthorizationRow)
-        .filter_by(task_id=task.task_id, revision=run.revision, validity="CURRENT")
-        .order_by(AuthorizationRow.created_at.desc())
-        .first()
-    )
-    budget_spec = (auth.execution_budget if auth else spec.get("execution_budget")) or {}
-    budget = ExecutionBudget(
-        max_iterations=None,
-        wall_clock_seconds=int(budget_spec.get("wallclock_hours", 1) * 3600),
-        cpu_cores=int(budget_spec.get("cpu_cores", 1)),
-        attempt_no=attempt.attempt_no,
-    )
-
-    handle = adapter.launch(str(staged_prepared), budget)
-    # JobHandle.run_id 由适配器从工作目录解析；保持一致性校验（不猜）
-    channel.post(
-        "RUNNING",
-        {
-            "process_identity": handle.process_identity,
-            "software_build": probe.star_build,
-            "stage": "launch",
-            "evidence_mode": mode,
-        },
-    )
-
-    # poll 循环：心跳载荷含真实阶段/日志位置/资源状态；取消请求异步确认
-    terminal = {"SUCCEEDED", "FAILED", "CANCELLED"}
-    phase = "RUNNING"
-    for _ in range(config.max_polls):
+    mode = "UNKNOWN"
+    handle = None
+    launch_attempted = False
+    channel.post("STARTING", {
+        "attempt_id": attempt_id, "launch_intent_id": f"intent-{job_id}",
+        "work_dir_summary": sha256_hex(str(work_dir))[:16], "stage": "environment_probe",
+    })
+    try:
+        session.commit()
+        probe = adapter.probe_environment()
+        mode = probe.evidence_mode
+        if mode not in {"MOCK", "REAL"}:
+            raise ValueError("适配器未声明有效 evidence_mode")
+        resolved = _resolve_execution_method(session, spec, mode)
+        auth = (session.query(AuthorizationRow)
+                .filter_by(task_id=task.task_id, revision=run.revision, validity="CURRENT", revoked_at=None)
+                .order_by(AuthorizationRow.created_at.desc()).first())
+        if auth is None:
+            raise ValueError("找不到本修订仍有效的人工授权，不使用 spec 预算替代授权")
+        prep = session.get(PreparationRow, auth.preparation_id)
+        if prep is None or prep.task_id != task.task_id or prep.revision != run.revision or prep.prepared_digest != auth.prepared_digest:
+            raise ValueError("授权与准备任务/修订/摘要不一致")
+        art = _find_prepared_artifact(session, prep, run.variant_id, run.condition_id)
+        if art is None:
+            raise ValueError("prepared 产物缺失或未绑定本任务/修订/准备，拒绝同名替代")
+        if mode == "REAL" and art.evidence_mode != "REAL":
+            raise ValueError("REAL 执行不能使用 MOCK/UNKNOWN 准备产物")
+        staged = work_dir / PurePosixPath(art.logical_path).name
+        content = Path(art.storage_path).read_bytes()
+        if hashlib.sha256(content).hexdigest() != art.sha256:
+            raise ValueError("准备产物 staging 前摘要改变")
+        staged.write_bytes(content)
+        raw_budget = auth.execution_budget or {}
+        wall_seconds = float(raw_budget.get("wallclock_hours", 0)) * 3600
+        cpu_cores = int(raw_budget.get("cpu_cores", 0))
+        if not math.isfinite(wall_seconds) or wall_seconds <= 0 or cpu_cores < 1:
+            raise ValueError("授权预算缺失或无效")
+        budget = ExecutionBudget(max_iterations=None, wall_clock_seconds=math.ceil(wall_seconds),
+                                 cpu_cores=cpu_cores, attempt_no=attempt_no)
+        method_exact = resolved.digest_match and resolved.manifest_sha256 == resolved.declared_sha256
+        launch_record = {
+            "job_id": job_id, "run_id": run_id, "attempt_id": attempt_id,
+            "preparation_id": prep.preparation_id, "prepared_digest": prep.prepared_digest,
+            "prepared_ref_sha": art.sha256, "adapter_build": getattr(adapter, "adapter_build", "unknown"),
+            "evidence_mode": mode, "method_version": resolved.version,
+            "method_digest_match": method_exact, "mock_method_fixture": mode == "MOCK" and not method_exact,
+            "budget": asdict(budget),
+            "environment_probe": asdict(probe),
+        }
+        (work_dir / "worker-launch-intent.json").write_text(json.dumps(launch_record, ensure_ascii=False, indent=2), encoding="utf-8")
         session.refresh(job)
         if job.cancel_requested:
-            status = adapter.cancel(handle)
-            channel.post(
-                "CANCELLED",
-                {
-                    "reason": "用户取消请求，受控进程组退出（现场确认）",
-                    "exit_proof": status.detail.get("exit_proof"),
-                    "exit_code": status.detail.get("exit_code", 130),
-                    "evidence_mode": mode,
-                },
-            )
+            _finish_interrupted(session, channel, config, adapter, None, work_dir,
+                project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                attempt_no=attempt_no, mode=mode, reason="启动前收到取消，未调用 launch",
+                exit_code=130, requested_outcome="CANCELLED")
             return
-        status = adapter.poll(handle)
-        phase = status.phase
-        if phase not in terminal:
-            channel.post(
-                "HEARTBEAT",
-                {
-                    "stage": phase,
-                    "log_location": status.log_location,
-                    "resource_state": {"cpu_cores": budget.cpu_cores},
-                    "evidence_mode": mode,
-                },
-            )
-        else:
-            break
-    if phase not in terminal:
-        channel.post(
-            "FAILED",
-            {"reason": f"poll 超过保护上限 {config.max_polls}（异常保护，不冒充完成）", "exit_code": 71},
-        )
-        return
-    if phase == "FAILED":
-        channel.post(
-            "FAILED",
-            {"reason": "求解器报告失败", "exit_code": status.detail.get("exit_code", 2), "evidence_mode": mode},
-        )
-        return
-    if phase == "CANCELLED":
-        channel.post(
-            "CANCELLED",
-            {"reason": "适配器报告已取消", "exit_code": status.detail.get("exit_code", 130), "evidence_mode": mode},
-        )
-        return
+        session.commit()
+        deadline = time.monotonic() + wall_seconds
+        launch_attempted = True
+        handle = adapter.launch(str(staged), budget)
+        if handle.run_id != run_id or handle.attempt_no != attempt_no or Path(handle.work_dir).resolve() != work_dir.resolve():
+            raise ValueError("启动句柄与本 run/attempt/工作目录不一致")
+        (work_dir / "worker-job-handle.json").write_text(json.dumps(asdict(handle), ensure_ascii=False, indent=2), encoding="utf-8")
+        channel.post("RUNNING", {
+            "process_identity": {"identity": handle.process_identity, "adapter_job_id": handle.job_id,
+                                 "work_dir": handle.work_dir, "launch_args": list(handle.launch_args)},
+            "software_build": probe.star_build, "stage": "launch", "evidence_mode": mode,
+            "method_version": resolved.version, "method_digest_match": method_exact,
+            "mock_method_fixture": mode == "MOCK" and not method_exact,
+        })
+        interval = config.poll_interval_seconds
+        if interval is None:
+            interval = 0.0 if mode == "MOCK" else 1.0
+        poll_limit = config.max_polls if config.max_polls is not None else (32 if mode == "MOCK" else None)
+        polls = 0
+        while True:
+            session.refresh(job)
+            cancel_requested = job.cancel_requested
+            session.commit()  # 查询取消标志会开启 BEGIN IMMEDIATE，等待前必须提交
+            if cancel_requested:
+                _finish_interrupted(session, channel, config, adapter, handle, work_dir,
+                    project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                    attempt_no=attempt_no, mode=mode, reason="用户取消请求，检查受控进程组退出",
+                    exit_code=130, requested_outcome="CANCELLED", launch_attempted=True)
+                return
+            if time.monotonic() >= deadline or (poll_limit is not None and polls >= poll_limit):
+                reason = "批准的墙钟预算耗尽" if time.monotonic() >= deadline else f"poll 超过保护上限 {poll_limit}"
+                _finish_interrupted(session, channel, config, adapter, handle, work_dir,
+                    project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                    attempt_no=attempt_no, mode=mode, reason=reason, exit_code=124, launch_attempted=True)
+                return
+            status = adapter.poll(handle)
+            polls += 1
+            if status.job_id != handle.job_id:
+                raise ValueError("poll 返回其它作业状态")
+            if status.phase in {"FAILED", "CANCELLED", "LOST"}:
+                _finish_interrupted(session, channel, config, adapter, handle, work_dir,
+                    project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                    attempt_no=attempt_no, mode=mode, reason=f"适配器报告 {status.phase}",
+                    exit_code=status.detail.get("exit_code") or 2,
+                    requested_outcome="CANCELLED" if status.phase == "CANCELLED" else "FAILED",
+                    launch_attempted=True)
+                return
+            if status.phase == "SUCCEEDED":
+                if mode == "REAL":
+                    if not _exit_confirmed(status, handle, mode):
+                        raise ValueError("REAL SUCCEEDED 缺少完整进程组退出证明")
+                    code = status.detail.get("exit_code")
+                    if type(code) is not int or code != 0 or status.detail["exit_proof"].get("returncode") != 0:
+                        raise ValueError("REAL SUCCEEDED 与已观测退出码不一致")
+                break
+            if status.phase not in {"STARTING", "RUNNING", "COLLECTING", "CANCELLING"}:
+                raise ValueError(f"未知适配器阶段: {status.phase}")
+            channel.post("HEARTBEAT", {
+                "stage": status.phase, "log_location": status.log_location,
+                "resource_state": {"cpu_cores": budget.cpu_cores}, "evidence_mode": mode,
+            })
+            session.commit()
+            time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
 
-    # COLLECTING：收集原始产物 → 登记 artifact（摘要核对）→ 提取 → 独立校核
-    collected = adapter.collect_outputs(handle)
-    artifact_ids: list[str] = []
-    report_art = monitor_art = None
-    for logical, expected_sha in collected.artifact_digests.items():
-        local = Path(work_dir) / Path(logical).name
-        actual_sha = hashlib.sha256(local.read_bytes()).hexdigest()
-        if actual_sha != expected_sha:
-            channel.post(
-                "FAILED",
-                {"reason": f"产物摘要核验失败 {logical}（证据故障）", "exit_code": 72},
-            )
+        session.commit()
+        collected = adapter.collect_outputs(handle)
+        artifact_ids, report_art, monitor_art = _register_collected(
+            session, config, collected, handle, project_id=project_id, job_id=job_id,
+            run_id=run_id, attempt_id=attempt_id, mode=mode,
+        )
+        raw_metrics = adapter.extract_metrics(collected)
+        if raw_metrics.evidence_mode != mode:
+            raise ValueError("指标 evidence_mode 与原始运行不一致")
+        infix = ".mock" if mode == "MOCK" else ""
+        metrics_path = work_dir / f"metrics{infix}.json"
+        body = {"evidence_mode": mode, "extractor_id": raw_metrics.extractor_id,
+                "extractor_version": raw_metrics.extractor_version,
+                "metric_values": raw_metrics.metric_values, "missing_metrics": list(raw_metrics.missing_metrics),
+                "source_artifacts": raw_metrics.source_artifacts}
+        banner = "# MOCK DATA - NOT REAL SOLVER OUTPUT\n" if mode == "MOCK" else ""
+        metrics_path.write_text(banner + json.dumps(body, ensure_ascii=False, indent=1, allow_nan=False), encoding="utf-8")
+        metrics_art = _commit_artifact(session, project_id=project_id, job_id=job_id,
+            logical_path=f"runs/{run_id}/attempt-{attempt_no}/metrics{infix}.json", src_path=metrics_path,
+            artifact_root=config.artifact_root, evidence_mode=mode, run_id=run_id, attempt_id=attempt_id)
+        session.commit()
+        artifact_ids.append(metrics_art.artifact_id)
+        # 执行结束再次解析，防止执行期间包文件变化后悄悄用新口径校核。
+        resolved = _resolve_execution_method(session, spec, mode)
+        pkg_id, pkg_ver = resolved.capability_package_id, resolved.version
+        rules, rule_set_sha = load_rule_set(pkg_id, pkg_ver)
+        metric_defs = load_metric_definitions(pkg_id, pkg_ver)
+        domain = load_domain(pkg_id, pkg_ver)
+        extracted = extract_run_metrics(report_art.storage_path if report_art else None,
+            monitor_art.storage_path if monitor_art else None, metric_definitions=metric_defs)
+        extracted.findings.extend(check_unit_semantics(spec))
+        result = verify_run(extracted=extracted, rules=rules, domain=domain,
+                            required_metrics=(spec.get("method") or {}).get("required_metrics", []))
+        run = session.get(RunRow, run_id)
+        ver = persist_verification(session, run=run, attempt_id=attempt_id, result=result,
+            rule_set_sha256=rule_set_sha,
+            source_artifact_ids=[a.artifact_id for a in (report_art, monitor_art, metrics_art) if a is not None])
+        session.commit()
+        session.refresh(job)
+        cancelled_during_collection = job.cancel_requested
+        session.commit()
+        if cancelled_during_collection:
+            _finish_interrupted(session, channel, config, adapter, handle, work_dir,
+                project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                attempt_no=attempt_no, mode=mode, reason="收集期间收到取消，保留已收集证据",
+                exit_code=130, requested_outcome="CANCELLED", launch_attempted=True)
             return
-        art = _commit_artifact(
-            session,
-            project_id=task.project_id,
-            job_id=job.job_id,
-            logical_path=f"runs/{run.run_id}/attempt-{attempt.attempt_no}/{logical}",
-            src_path=local,
-            artifact_root=config.artifact_root,
-            evidence_mode=collected.evidence_mode,
-            run_id=run.run_id,
-            attempt_id=attempt.attempt_id,
-        )
-        artifact_ids.append(art.artifact_id)
-        if "report" in logical:
-            report_art = art
-        if "monitor" in logical:
-            monitor_art = art
-
-    # 固定提取器结构化原始指标输入 → 存为指标 artifact（缺值为 null，不填 0）
-    raw_metrics = adapter.extract_metrics(collected)
-    metrics_path = work_dir / f"metrics{infix}.json"
-    import json as _json
-
-    metrics_body = {
-        "evidence_mode": mode,
-        "extractor_id": raw_metrics.extractor_id,
-        "extractor_version": raw_metrics.extractor_version,
-        "metric_values": raw_metrics.metric_values,
-        "missing_metrics": list(raw_metrics.missing_metrics),
-        "source_artifacts": raw_metrics.source_artifacts,
-    }
-    banner = "# MOCK DATA - NOT REAL SOLVER OUTPUT\n" if mode == "MOCK" else ""
-    metrics_path.write_text(
-        banner + _json.dumps(metrics_body, ensure_ascii=False, indent=1),
-        encoding="utf-8",
-    )
-    metrics_art = _commit_artifact(
-        session,
-        project_id=task.project_id,
-        job_id=job.job_id,
-        logical_path=f"runs/{run.run_id}/attempt-{attempt.attempt_no}/metrics{infix}.json",
-        src_path=metrics_path,
-        artifact_root=config.artifact_root,
-        evidence_mode=mode,
-        run_id=run.run_id,
-        attempt_id=attempt.attempt_id,
-    )
-    artifact_ids.append(metrics_art.artifact_id)
-
-    # 独立校核（FR-15/16）：从原始 CSV 复算，不照抄报告；阈值 null → UNCONFIRMED
-    method = spec.get("method") or {}
-    pkg_id = method.get("capability_package_id", "buffer_chamber")
-    pkg_ver = "0.1.0"
-    rules, rule_set_sha = load_rule_set(pkg_id, pkg_ver)
-    metric_defs = load_metric_definitions(pkg_id, pkg_ver)
-    domain = load_domain(pkg_id, pkg_ver)
-    extracted = extract_run_metrics(
-        report_art.storage_path if report_art else None,
-        monitor_art.storage_path if monitor_art else None,
-        metric_definitions=metric_defs,
-    )
-    extracted.findings.extend(check_unit_semantics(spec))
-    result = verify_run(
-        extracted=extracted,
-        rules=rules,
-        domain=domain,
-        required_metrics=method.get("required_metrics", []),
-    )
-    ver = persist_verification(
-        session,
-        run=run,
-        attempt_id=attempt.attempt_id,
-        result=result,
-        rule_set_sha256=rule_set_sha,
-        source_artifact_ids=[a for a in (report_art and report_art.artifact_id, monitor_art and monitor_art.artifact_id, metrics_art.artifact_id) if a],
-    )
-    session.commit()
-
-    channel.post(
-        "COMPLETED",
-        {
-            "exit_code": 0,
-            "artifact_ids": artifact_ids,
-            "verification_id": ver.verification_id,
-            "numerical_conclusion": result.conclusion,
-            "applicability": result.applicability,
-            "evidence_mode": mode,
-        },
-    )
+        channel.post("COMPLETED", {"exit_code": 0, "exit_proof": status.detail.get("exit_proof"),
+            "artifact_ids": artifact_ids, "verification_id": ver.verification_id,
+            "numerical_conclusion": result.conclusion, "applicability": result.applicability,
+            "evidence_mode": mode, "method_version": resolved.version,
+            "method_digest_match": resolved.digest_match})
+    except BaseException as exc:
+        session.rollback()
+        session.invalidate()
+        try:
+            _finish_interrupted(session, channel, config, adapter, handle, work_dir,
+                project_id=project_id, job_id=job_id, run_id=run_id, attempt_id=attempt_id,
+                attempt_no=attempt_no, mode=mode, reason=f"Worker 执行异常: {type(exc).__name__}: {exc}",
+                exit_code=130 if isinstance(exc, KeyboardInterrupt) else 1,
+                requested_outcome="CANCELLED" if isinstance(exc, KeyboardInterrupt) else "FAILED",
+                launch_attempted=launch_attempted)
+        finally:
+            # Ctrl-C/SystemExit 先清理受控进程、冻结证据，再交还调用方；不伪装正常完成。
+            if not isinstance(exc, Exception):
+                raise exc
 
 
 # ---------------------------------------------------------------------------
@@ -699,6 +930,7 @@ def run_until_idle(
         session.commit()
         if job is None:
             break
+        job_id = job.job_id
         channel = _EventChannel(session, wal, job, lease)
         try:
             if job.kind == "PREPARE":
@@ -709,20 +941,23 @@ def run_until_idle(
                 channel.post("FAILED", {"reason": f"未知 Job.kind: {job.kind}", "exit_code": 64})
         except Exception as exc:  # 失败不删除：如实 FAILED 事件 + 现场保留
             session.rollback()
-            job = session.get(JobRow, job.job_id)
+            session.invalidate()
+            job = session.get(JobRow, job_id)
             lease = (
                 session.query(LeaseRow)
-                .filter_by(job_id=job.job_id, active=True)
+                .filter_by(job_id=job_id, active=True)
                 .order_by(LeaseRow.fencing_token.desc())
                 .first()
             )
             if job is not None and lease is not None:
                 channel = _EventChannel(session, wal, job, lease)
+                if job.state == "LEASED":
+                    channel.post("STARTING", {"stage": "worker_initialization", "launch_intent_id": f"intent-{job_id}"})
                 channel.post(
                     "FAILED",
                     {"reason": f"Worker 内部异常: {type(exc).__name__}: {exc}", "exit_code": 1},
                 )
-        processed.append(job.job_id)
+        processed.append(job_id)
         count += 1
     return processed
 

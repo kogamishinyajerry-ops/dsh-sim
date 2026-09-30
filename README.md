@@ -1,6 +1,6 @@
 # dsh-sim — DSH 工业仿真智能体（R0 首版）
 
-![tests](https://img.shields.io/badge/tests-150%20passed-brightgreen) ![coverage](https://img.shields.io/badge/coverage-86%25-green) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
+![python](https://img.shields.io/badge/python-3.12%2B-blue) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > 面向 STAR-CCM+ 等 CAE 求解器的**可信仿真智能体工程服务**：五维状态机 + 人工审批门 + 证据链哈希冻结 + MCP 工具接口 + 双工作台 UI。核心设计原则——**智能体永远拿不到授权与接受权**；MOCK/REAL 数据严格分色；未知状态醒目标注，拒绝"单绿勾"。
 >
@@ -8,7 +8,30 @@
 
 ## 一句话现状
 
-工程服务 + 12 MCP 工具 + 双工作台 + Mock 端到端闭环**已实现并 147 项测试全绿**；真实 STAR-CCM+ 探针 5/9 通过（限定）；**任何"工程通过/接受"当前都不可达成**——能力包为 DRAFT（阈值 TBD），这是设计使然，不是缺陷。
+2026-10-01 新增的公开 OpenFOAM 通道已经通过真实 Task → Prepare → Run → Verify → Bundle 闭环：
+基准、第二组几何/工况、求解失败、运行中取消和超时均有保留证据。完整测试 **378 passed**，
+其中 5 项为真实 OpenFOAM 测试。两组成功求解的数值结论仍为 `INSUFFICIENT`，适用性仍为
+`UNCONFIRMED`：方法包是 DRAFT，工程阈值没有由开发代为冻结。
+
+原有 STAR-CCM+ 探针与 Mock 台账保留在下方。真实 STAR 生产适配器、生产 IdP、在线自然语言端到端和
+`sim-live-hub` 契约对接仍有外部依赖；当前实现不声称这些事项已完成。详见
+[本轮验证记录](docs/p0-validation-2026-10-01.md) 和 [OpenFOAM 运行说明](docs/openfoam-validation.md)。
+
+## 一条命令运行公开验证
+
+在独立 Python 环境安装本仓库，并加载已支持的串行 OpenFOAM v1912 环境后执行：
+
+```bash
+python -m dsh_sim.validation.openfoam \
+  --local-validation --case baseline --output var/channel-baseline
+```
+
+目标目录必须不存在。命令输出实时 Worker 事件，并生成 `report.html`、`summary.json`、
+冻结原始证据和可独立校验的导出。它只接受五个内置公开实验，使用新建的本地验证数据库和
+明确标记的测试授权夹具；不连接生产 API、不打开已有数据库、不代表人工批准。
+
+自然语言接入由 [JerryDSH-Assets 的原生 DSH 薄插件](https://github.com/kogamishinyajerry-ops/JerryDSH-Assets/tree/codex/p0-reproducible-sim/self-built/dsh-sim-orchestrator)
+提供，继续使用本服务原有的 12 个 MCP 工具和人工授权门。
 
 ## 运行
 
@@ -55,9 +78,10 @@ export DSH_SIM_IDENTITY_MODE=dev        # PowerShell: $env:DSH_SIM_IDENTITY_MODE
 | MCP 12 工具 | list_capabilities/get_task/create_task/revise_task/prepare_task/get_preparation/submit_runs/get_run/cancel_run/build_bundle/get_evidence/draft_review_issue；AGENT 身份、UNAVAILABLE 结构化错误、无禁止工具 | list_tools 实跑 + happy path |
 | 双工作台 | 执行台五区域（筛选/矩阵/回读差异/运行心跳/结果先行）；审查台五区域（阻塞置顶/证据抽查链/整改/双主动作+一次性确认）；MOCK 琥珀徽章、未知态条纹、离线横幅 | JS 语法+静态引用校验 |
 
-**测试总数：147 passed / 0 failed**（`pytest -m mock`，86s）。
+以上 Mock 模块沿用原验收台账；本轮精确测试命令和 **378 passed** 的运行环境见
+[2026-10-01 记录](docs/p0-validation-2026-10-01.md)。旧覆盖率数值未在本轮重测，不用历史 badge 代表当前覆盖率。
 
-### 真实验证（REAL）
+### 既有 STAR 真实探针记录（本轮未重跑）
 
 | 探针 | 状态 | 证据 |
 |---|---|---|
@@ -92,10 +116,10 @@ export DSH_SIM_IDENTITY_MODE=dev        # PowerShell: $env:DSH_SIM_IDENTITY_MODE
 contracts/        OpenAPI 0.1.1 + task-draft/spec JSON Schema + canonical-json-v1 规范
 src/dsh_sim/      单包：canonical(冻结) domain db queue api adapters worker verify evidence review mcp capabilities
 panels/           执行台 + 审查台（原生 ESM，无构建）
-capabilities/     buffer_chamber/0.1.0（DRAFT，阈值全 TBD）
+capabilities/     buffer_chamber/0.1.0 与 openfoam_channel/0.1.0（均 DRAFT，工程阈值 TBD）
 acceptance/       requirements.csv(FR-01..32) test_matrix.csv(TC-001..064) field-acceptance-record.md
 compatibility/    P01-P09 探针记录 + 原始证据 JSON
-docs/             mcp-integration.md（dsh 接入与验收 checklist）
+docs/             MCP 接入、OpenFOAM 公开实验与实际验证记录
 CONVENTIONS.md    跨 Agent 开发契约（红线/边界/冻结接口）
 ```
 

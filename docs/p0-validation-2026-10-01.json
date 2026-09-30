@@ -1,0 +1,226 @@
+{
+  "record_date": "2026-10-01 Asia/Shanghai",
+  "scope": "public local integration validation; no human engineering approval",
+  "python": "3.12.14",
+  "openfoam": "OpenCFD v1912 / Ubuntu 1912.200626-2build3 / serial Linux",
+  "adapter_source_sha256": "e0ccde081c6945cdf36595ce2a68d8dc99d6f3b4b76f6c65d2c056f1213639dc",
+  "tests": {
+    "command": "python -m pytest -q -m ''",
+    "passed": 378,
+    "real_solver_tests": 5,
+    "failures": 0,
+    "skips": 0
+  },
+  "scenarios": [
+    {
+      "scenario": "baseline",
+      "evidence_mode": "REAL",
+      "identity_mode": "local_validation_fixture",
+      "task_id": "task_9a6b3dc04f8d4839811b5c0b",
+      "spec_sha256": "ee3fe8fb9cee32429216fc91061ac8a1e62630cf093509a45dba4a206496d949",
+      "prepared_digest": "38af1c90cf6bf51b6d04f724998904f89f0247c0d90af91d29f48699796af761",
+      "bundle_id": "bundle_0ad9007d80c14ec5ab7d6d29",
+      "bundle_digest": "e2baf0bf8fbc05b61571dfc87ecdff272a82f37607c439742f0b6fb16719838a",
+      "scenario_assertions_passed": true,
+      "runs": [
+        {
+          "run_id": "run_8d25018b47d342a0b78dc3a3",
+          "execution_state": "SUCCEEDED",
+          "numerical_state": "INSUFFICIENT",
+          "applicability_state": "UNCONFIRMED",
+          "attempt_id": "att_d6e160acd17246a5bdeb23ca"
+        }
+      ],
+      "frozen_artifacts": 65,
+      "relocated_integrity": "VERIFIED",
+      "terminal_event": {
+        "kind": "COMPLETED",
+        "exit_code": 0,
+        "reason": null,
+        "process_exited": true,
+        "process_group_exited": true,
+        "remaining_pids": [],
+        "observed_returncode": 0
+      },
+      "observations": {
+        "metric_values": {
+          "boundary_mass_flow@inlet": -0.010000000000000401,
+          "total_pressure@inlet": 11.988079997851175,
+          "static_pressure@inlet": 11.908619999999999,
+          "boundary_mass_flow@outlet": 0.009999999999998399,
+          "total_pressure@outlet": 0.0766635123423069,
+          "static_pressure@outlet": 0.0,
+          "steady_mass_imbalance": null,
+          "outlet_distribution@outlet": 1.0,
+          "total_pressure_loss": 11.911416485508868,
+          "monitor_stability": null
+        },
+        "static_pressure_drop_pa": 11.908619999999999,
+        "analytical_fully_developed_drop_pa": 11.999999999999996,
+        "relative_reference_difference": 0.007614999999999782,
+        "source_artifact_id": "art_23c154f732424c0698cd9dbb",
+        "source_sha256": "c0a767f960a29077afe423807956b23ecf7407b24f6be3f9f277ccc1edabc360",
+        "interpretation": "Diagnostic comparison; no engineering tolerance has been frozen. Source pressure is relative to the solver reference."
+      }
+    },
+    {
+      "scenario": "transfer",
+      "evidence_mode": "REAL",
+      "identity_mode": "local_validation_fixture",
+      "task_id": "task_eccac364943f4e709445bdb4",
+      "spec_sha256": "329ab9d9c5fe50844a3544a8647812b8eecaa83cba27787aa56abead38fdba3b",
+      "prepared_digest": "decdaecf3f3ca6f476138e2e948a6dc8b8c8172a2fb8044b24abdf30328a174b",
+      "bundle_id": "bundle_541511064f794941bac69138",
+      "bundle_digest": "03f79801ef363e131b2898f64cdf837aa7d8011029ffa8ab2eb736fd4c6358e1",
+      "scenario_assertions_passed": true,
+      "runs": [
+        {
+          "run_id": "run_a4fe31226d4742c7ae53d40a",
+          "execution_state": "SUCCEEDED",
+          "numerical_state": "INSUFFICIENT",
+          "applicability_state": "UNCONFIRMED",
+          "attempt_id": "att_e36292cf739c4a9ba857be8c"
+        }
+      ],
+      "frozen_artifacts": 65,
+      "relocated_integrity": "VERIFIED",
+      "terminal_event": {
+        "kind": "COMPLETED",
+        "exit_code": 0,
+        "reason": null,
+        "process_exited": true,
+        "process_group_exited": true,
+        "remaining_pids": [],
+        "observed_returncode": 0
+      },
+      "observations": {
+        "metric_values": {
+          "boundary_mass_flow@inlet": -0.01368000000000266,
+          "total_pressure@inlet": 32.02898573294937,
+          "static_pressure@inlet": 31.857165422073745,
+          "boundary_mass_flow@outlet": 0.01368000000000247,
+          "total_pressure@outlet": 0.1641797878527589,
+          "static_pressure@outlet": 0.0,
+          "steady_mass_imbalance": null,
+          "outlet_distribution@outlet": 1.0,
+          "total_pressure_loss": 31.864805945096613,
+          "monitor_stability": null
+        },
+        "static_pressure_drop_pa": 31.857165422073745,
+        "analytical_fully_developed_drop_pa": 32.06249999999999,
+        "relative_reference_difference": 0.006404197362222157,
+        "source_artifact_id": "art_72b6a57fa2f64d86afd59066",
+        "source_sha256": "227f48228c6319a71cc5ba9aaae17cc1f2676575e9f8d5436d9f717c9d18f90d",
+        "interpretation": "Diagnostic comparison; no engineering tolerance has been frozen. Source pressure is relative to the solver reference."
+      }
+    },
+    {
+      "scenario": "solver-failure",
+      "evidence_mode": "REAL",
+      "identity_mode": "local_validation_fixture",
+      "task_id": "task_8aace194ad2d4ba1b93bfcf9",
+      "spec_sha256": "dc2318ae3d4235f152561a456afb35b046ca578884e6febee6778fff28e7af60",
+      "prepared_digest": "aad7d296f26f7f1380cc0c2f367719864ad0ea96f82802aec8fe50817a53265d",
+      "bundle_id": "bundle_26396306c1e24cfca70a19ae",
+      "bundle_digest": "9e3e9191f5b2d2807f74094ab9cfa5ef82ff858a59f53a322bc46cbfdd3e34d2",
+      "scenario_assertions_passed": true,
+      "runs": [
+        {
+          "run_id": "run_0134c59a30424a85af62203d",
+          "execution_state": "FAILED",
+          "numerical_state": "NOT_CHECKED",
+          "applicability_state": "UNCONFIRMED",
+          "attempt_id": "att_b8967abee19549a59afe99ec"
+        }
+      ],
+      "frozen_artifacts": 48,
+      "relocated_integrity": "VERIFIED",
+      "terminal_event": {
+        "kind": "FAILED",
+        "exit_code": 1,
+        "reason": "适配器报告 FAILED",
+        "process_exited": true,
+        "process_group_exited": true,
+        "remaining_pids": [],
+        "observed_returncode": 1
+      },
+      "observations": {}
+    },
+    {
+      "scenario": "cancel",
+      "evidence_mode": "REAL",
+      "identity_mode": "local_validation_fixture",
+      "task_id": "task_2121983ce305454e817c66ca",
+      "spec_sha256": "ff9ecbb003f8543c0235721f469071c54951d2c56ca2c841413e9aaea67f5763",
+      "prepared_digest": "e902463af0d9c100165087ce78621466048505b32b35f66001bd035f5aeb6b50",
+      "bundle_id": "bundle_417d7fe0e39042c690a394a4",
+      "bundle_digest": "5619e2a12b3a67425575e9ef384a275e0a2765193aa8832fd6cbac9856ab6892",
+      "scenario_assertions_passed": true,
+      "runs": [
+        {
+          "run_id": "run_296e250d85b946d0b4531ee7",
+          "execution_state": "CANCELLED",
+          "numerical_state": "NOT_CHECKED",
+          "applicability_state": "UNCONFIRMED",
+          "attempt_id": "att_8bd54c3e8a3244a2b80a4a97"
+        }
+      ],
+      "frozen_artifacts": 50,
+      "relocated_integrity": "VERIFIED",
+      "terminal_event": {
+        "kind": "CANCELLED",
+        "exit_code": 130,
+        "reason": "用户取消请求，检查受控进程组退出",
+        "process_exited": true,
+        "process_group_exited": true,
+        "remaining_pids": [],
+        "observed_returncode": 130
+      },
+      "observations": {}
+    },
+    {
+      "scenario": "timeout",
+      "evidence_mode": "REAL",
+      "identity_mode": "local_validation_fixture",
+      "task_id": "task_de948aa9ae8d4424abc1f391",
+      "spec_sha256": "be207d04a1b6474b9e4cb8afb0d2de92e711591ec7fc00d311e5231a760023c8",
+      "prepared_digest": "081199d060357fdfc0a825159b6c388ab9849649ce97e1e0f043157530930e4d",
+      "bundle_id": "bundle_8fb34097a7c94571b4e5bcba",
+      "bundle_digest": "19fd0f81f9d0726ecc4535b5f0224cc1fa0707f192c096861dc8a8b7b40bdd11",
+      "scenario_assertions_passed": true,
+      "runs": [
+        {
+          "run_id": "run_5eea49e9c49d4a51868e8a98",
+          "execution_state": "FAILED",
+          "numerical_state": "NOT_CHECKED",
+          "applicability_state": "UNCONFIRMED",
+          "attempt_id": "att_bae78b5e143440eb8fe9e96d"
+        }
+      ],
+      "frozen_artifacts": 50,
+      "relocated_integrity": "VERIFIED",
+      "terminal_event": {
+        "kind": "FAILED",
+        "exit_code": 124,
+        "reason": "批准的墙钟预算耗尽",
+        "process_exited": true,
+        "process_group_exited": true,
+        "remaining_pids": [],
+        "observed_returncode": 130
+      },
+      "observations": {}
+    }
+  ],
+  "tamper_check": {
+    "rejected": true,
+    "error": "Export artifact digest/length mismatch: art_52989b591987436fa4f263ef",
+    "original_evidence_unchanged": true
+  },
+  "limitations": [
+    "DRAFT capability; engineering tolerances and applicability unconfirmed",
+    "No live LLM or DSH natural-language E2E",
+    "Production identity/IdP not implemented",
+    "Worker restart does not automatically adopt a running job",
+    "STAR, MPI, sim-live-hub integration not validated"
+  ]
+}

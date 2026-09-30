@@ -1,0 +1,56 @@
+{
+  "capability_package_id": "openfoam_channel",
+  "version": "0.1.0",
+  "metrics": [
+    {
+      "metric_id": "boundary_mass_flow",
+      "unit": "kg/s",
+      "definition": "Constant density multiplied by the sum of solver phi on the named boundary; outward-positive. Raw phi and conversion provenance are retained.",
+      "tolerance": null
+    },
+    {
+      "metric_id": "static_pressure",
+      "unit": "Pa",
+      "definition": "Area-weighted mean boundary kinematic pressure from actual p, multiplied by the constant reference density. Values are relative to the solver pressure reference; no absolute-pressure claim is made.",
+      "reference_tolerance": null
+    },
+    {
+      "metric_id": "total_pressure",
+      "unit": "Pa",
+      "definition": "Flux-weighted boundary total pressure from per-face rho*(p + |U|^2/2), only when actual p, U, phi and boundary correspondence are available. Values use the solver pressure reference.",
+      "reference_tolerance": null
+    },
+    {
+      "metric_id": "steady_mass_imbalance",
+      "unit": "dimensionless",
+      "definition": "abs(sum boundary mass flow) / max(incoming mass flow, m_floor); not evaluated without a frozen reference floor.",
+      "m_floor": null,
+      "tolerance": null
+    },
+    {
+      "metric_id": "total_pressure_loss",
+      "unit": "Pa",
+      "approved_sections": null,
+      "approved_weights": null,
+      "reference_tolerance": null
+    },
+    {
+      "metric_id": "outlet_distribution",
+      "unit": "dimensionless",
+      "tolerance": null
+    },
+    {
+      "metric_id": "monitor_stability",
+      "unit": "dimensionless",
+      "window": null,
+      "min_samples": null,
+      "allowed_variation": null
+    }
+  ],
+  "required_metric_naming": "Exact metric IDs, e.g. boundary_mass_flow@inlet and static_pressure@outlet. No alias or missing value is inferred.",
+  "reference_observations": {
+    "fully_developed_static_pressure_drop_pa": "12*rho*nu*Umean*L/H^2",
+    "scope": "Analytical diagnostic for fully developed parallel-plate flow. A finite inlet/outlet grid, discrete inlet profile and boundary sampling can differ. Record the observed error; do not convert it to PASS without Owner-approved tolerances.",
+    "reference_tolerance": null
+  }
+}

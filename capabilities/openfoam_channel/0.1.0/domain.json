@@ -1,0 +1,21 @@
+{
+  "capability_package_id": "openfoam_channel",
+  "version": "0.1.0",
+  "purpose": "design_screening",
+  "validation_only": true,
+  "description": "Public two-dimensional laminar parallel-plate channel for software integration experiments. No production applicability is approved.",
+  "physics": "steady incompressible Newtonian laminar flow; constant density; no mass sources",
+  "parameter_domain": {
+    "implemented_fields": ["inlet.mean_velocity", "fluid.kinematic_viscosity", "fluid.density"],
+    "parameter_lower_bounds": null,
+    "parameter_upper_bounds": null,
+    "note": "The implemented field list is a software allowlist. Owner-approved engineering bounds remain TBD."
+  },
+  "applicability": {
+    "geometry_scope": "UNCONFIRMED",
+    "condition_scope": "UNCONFIRMED",
+    "physics_scope": "UNCONFIRMED",
+    "usage_scope": "UNCONFIRMED"
+  },
+  "out_of_scope": ["production engineering acceptance", "compressible flow", "turbulence", "HPC/MPI", "arbitrary CAD", "STAR-CCM+"]
+}

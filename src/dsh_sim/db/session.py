@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL
 from sqlalchemy.orm import Session, sessionmaker
 
 from dsh_sim.db.models import Base
@@ -30,12 +30,13 @@ def database_url() -> str:
     return f"sqlite:///{DEFAULT_DB_PATH.as_posix()}"
 
 
-def make_engine(url: str | None = None) -> Engine:
+def make_engine(url: str | URL | None = None) -> Engine:
     url = url or database_url()
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    is_sqlite = url.get_backend_name() == "sqlite" if isinstance(url, URL) else url.startswith("sqlite")
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
     engine = create_engine(url, connect_args=connect_args, future=True)
 
-    if url.startswith("sqlite"):
+    if is_sqlite:
 
         @event.listens_for(engine, "begin")
         def _begin_immediate(conn):  # noqa: ANN001, ANN202
