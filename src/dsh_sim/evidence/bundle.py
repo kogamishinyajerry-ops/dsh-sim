@@ -25,6 +25,8 @@ from dsh_sim.db.models import (
     ArtifactRow,
     BundleRow,
     ClaimRow,
+    EventRow,
+    JobRow,
     PreparationRow,
     RunRow,
     TaskRevisionRow,
@@ -34,6 +36,50 @@ from dsh_sim.db.models import (
 from dsh_sim.domain.errors import ApiError, ErrorCode
 from dsh_sim.verify.extract import extract_run_metrics
 from dsh_sim.verify.verifier import load_metric_definitions
+
+_NORMALIZED_NAMES = {
+    "report": {"report.csv", "report.mock.csv"},
+    "monitor": {"monitor.csv", "monitor.mock.csv"},
+    "metrics": {"metrics.json", "metrics.mock.json"},
+}
+
+
+def _single_normalized_artifact(artifacts: list[ArtifactRow], kind: str) -> ArtifactRow | None:
+    """Only a unique normalized input is usable; solver logs are not report CSVs."""
+    matches = [a for a in artifacts if Path(a.logical_path).name in _NORMALIZED_NAMES[kind]]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _prepared_artifact(
+    session: Session, task: TaskRow, prep: PreparationRow, logical: str, expected_sha: str,
+) -> ArtifactRow | None:
+    """Bind bytes to the task's PREPARE job and its recorded preparation identity."""
+    candidates = (
+        session.query(ArtifactRow)
+        .join(JobRow, ArtifactRow.job_id == JobRow.job_id)
+        .filter(
+            ArtifactRow.project_id == task.project_id,
+            ArtifactRow.logical_path == logical,
+            ArtifactRow.sha256 == expected_sha,
+            ArtifactRow.state == "COMMITTED",
+            ArtifactRow.run_id.is_(None),
+            JobRow.task_id == prep.task_id,
+            JobRow.kind == "PREPARE",
+        )
+        .all()
+    )
+    bound = []
+    for art in candidates:
+        starts = session.query(EventRow).filter_by(job_id=art.job_id, kind="STARTING").all()
+        if not any((event.payload or {}).get("preparation_id") == prep.preparation_id for event in starts):
+            continue
+        path = Path(art.storage_path) if art.storage_path else None
+        if path is None or not path.is_file():
+            continue
+        content = path.read_bytes()
+        if len(content) == art.length and hashlib.sha256(content).hexdigest() == expected_sha:
+            bound.append(art)
+    return bound[0] if len(bound) == 1 else None
 
 
 def _new_id(prefix: str) -> str:
@@ -120,19 +166,13 @@ def bundle_evidence_mode(session: Session, task_id: str, revision: int) -> str:
         .order_by(PreparationRow.created_at.desc())
         .first()
     )
-    if prep is not None and project_id:
-        logicals = sorted((prep.prepared_artifacts or {}).keys())
-        if logicals:
-            modes.extend(
-                a.evidence_mode
-                for a in session.query(ArtifactRow)
-                .filter(
-                    ArtifactRow.project_id == project_id,
-                    ArtifactRow.logical_path.in_(logicals),
-                    ArtifactRow.state == "COMMITTED",
-                )
-                .all()
-            )
+    if prep is not None and project_id and prep.prepared_artifacts:
+        for logical, expected_sha in sorted(prep.prepared_artifacts.items()):
+            art = _prepared_artifact(session, task, prep, logical, expected_sha)
+            modes.append(art.evidence_mode if art is not None else None)
+    else:
+        # Missing upstream evidence cannot be omitted to manufacture all-REAL provenance.
+        modes.append(None)
 
     if not modes:
         return "UNKNOWN"
@@ -180,17 +220,22 @@ def compute_completeness(
                         "execution_state": run.execution_state,
                     }
                 )
+            if not run.current_attempt_id:
+                missing.append({"kind": "MISSING_SELECTED_ATTEMPT", "cell": cell, "run_id": run.run_id})
+                continue
             artifacts = (
                 session.query(ArtifactRow)
-                .filter_by(run_id=run.run_id, state="COMMITTED")
+                .filter_by(run_id=run.run_id, attempt_id=run.current_attempt_id, state="COMMITTED")
                 .all()
             )
-            if not any("report" in a.logical_path for a in artifacts):
+            if _single_normalized_artifact(artifacts, "report") is None:
                 missing.append(
                     {"kind": "MISSING_RAW_REPORT", "cell": cell, "run_id": run.run_id}
                 )
             ver = (
-                session.query(VerificationRow).filter_by(run_id=run.run_id).first()
+                session.query(VerificationRow)
+                .filter_by(run_id=run.run_id, attempt_id=run.current_attempt_id)
+                .first()
             )
             if ver is None:
                 missing.append(
@@ -216,20 +261,22 @@ def _draft_claims(
         metric_defs = load_metric_definitions("buffer_chamber", "0.1.0")
     units = {m["metric_id"]: m.get("unit", "") for m in metric_defs.get("metrics", [])}
     for run in runs:
+        if not run.current_attempt_id:
+            continue
         artifacts = (
             session.query(ArtifactRow)
-            .filter_by(run_id=run.run_id, state="COMMITTED")
+            .filter_by(run_id=run.run_id, attempt_id=run.current_attempt_id, state="COMMITTED")
             .all()
         )
-        report = next((a for a in artifacts if "report" in a.logical_path), None)
-        monitor = next((a for a in artifacts if "monitor" in a.logical_path), None)
-        metrics_art = next((a for a in artifacts if "metrics" in a.logical_path), None)
-        if metrics_art is None or not metrics_art.storage_path:
+        report = _single_normalized_artifact(artifacts, "report")
+        monitor = _single_normalized_artifact(artifacts, "monitor")
+        metrics_art = _single_normalized_artifact(artifacts, "metrics")
+        if report is None or metrics_art is None or not metrics_art.storage_path:
             continue
         body = Path(metrics_art.storage_path).read_text(encoding="utf-8")
-        adapter_values: dict[str, Any] = json.loads(body.split("\n", 1)[-1]).get(
-            "metric_values", {}
-        )
+        if body.startswith("# MOCK DATA - NOT REAL SOLVER OUTPUT\n"):
+            body = body.split("\n", 1)[1]
+        adapter_values: dict[str, Any] = json.loads(body).get("metric_values", {})
 
         recomputed = extract_run_metrics(
             report.storage_path if report else None,
@@ -240,7 +287,7 @@ def _draft_claims(
         for metric_id in sorted(set(adapter_values) | set(recomputed)):
             value = recomputed.get(metric_id)
             base = metric_id.split("@", 1)[0]
-            unit = units.get(base, "")
+            unit = units.get(metric_id, units.get(base, ""))
             shown = "null（缺失）" if value is None else f"{value} {unit}".strip()
             cross = adapter_values.get(metric_id)
             confirmed = (
@@ -255,8 +302,9 @@ def _draft_claims(
                     metric_id=metric_id,
                     artifact_id=metrics_art.artifact_id,
                     text=(
-                        f"Run {run.variant_id}×{run.condition_id} 指标 {metric_id} = {shown}"
-                        f"（独立复算值）；来源 artifact {metrics_art.artifact_id}。"
+                        f"Run {run.variant_id}×{run.condition_id} attempt {run.current_attempt_id} "
+                        f"指标 {metric_id} = {shown}（独立复算值）；"
+                        f"报告 artifact {report.artifact_id}，交叉指标 artifact {metrics_art.artifact_id}。"
                     ),
                     author_type="AGENT",
                     state="CONFIRMED" if confirmed else "DRAFT",
@@ -309,6 +357,41 @@ def build_bundle(
     infix = ".mock" if mock else ""
     mode_or_none = mode if mode != "UNKNOWN" else None
     completeness = compute_completeness(session, task_id, revision)
+
+    resolved = resolve_method_package(session, rev.spec.get("method"))
+    if mode == "REAL" and not resolved.digest_match:
+        raise ApiError(
+            ErrorCode.CONFLICT_DIGEST,
+            "REAL 证据包的方法摘要与 TaskSpec 不一致，不能用替代方法复算或冻结",
+            details={"declared_sha256": resolved.declared_sha256, "actual_sha256": resolved.manifest_sha256},
+        )
+    # Capture all indexed method files, then use these same bytes for claims and
+    # freezing. A resolved package cannot silently change between those steps.
+    method_roles = {
+        "metric-definitions.json": "method_metrics",
+        "rules.json": "rules",
+        "domain.json": "method_domain",
+        "manifest.json": "method_manifest",
+    }
+    file_index = resolved.manifest.get("content_sha256") or {}
+    for name in file_index:
+        method_roles.setdefault(name, "method_source")
+    method_files = {}
+    for name in method_roles:
+        path = resolved.source_dir / name
+        if path.is_file():
+            method_files[name] = path.read_bytes()
+    required_method_files = {"manifest.json", "metric-definitions.json", "rules.json", "domain.json"}
+    missing_method_files = sorted(required_method_files - method_files.keys())
+    if missing_method_files:
+        raise ApiError(ErrorCode.BLOCKED, "能力包必需文件缺失，不能冻结", details={"paths": missing_method_files})
+    for name, expected_sha in file_index.items():
+        if name not in method_files or hashlib.sha256(method_files[name]).hexdigest() != expected_sha:
+            raise ApiError(ErrorCode.CONFLICT_DIGEST, "冻结时能力包源文件摘要不符", details={"path": name})
+    manifest_sha = sha256_hex(canonical_dumps(json.loads(method_files["manifest.json"])))
+    if manifest_sha != resolved.manifest_sha256:
+        raise ApiError(ErrorCode.CONFLICT_DIGEST, "冻结时能力包 manifest 已变化")
+    metric_defs = json.loads(method_files["metric-definitions.json"])
 
     bundle_id = _new_id("bundle")
     manifest: list[dict[str, Any]] = []
@@ -365,18 +448,8 @@ def build_bundle(
             mode_or_none,
         )
         for logical, expected_sha in sorted((prep.prepared_artifacts or {}).items()):
-            # 问题 2 验收条件 2：准备产物按**归属 + 摘要**匹配，不能仅凭 logical_path
-            # 全局 first()——同名路径可能属于其它项目或内容已被替换。
-            art = (
-                session.query(ArtifactRow)
-                .filter_by(
-                    project_id=task.project_id,
-                    logical_path=logical,
-                    sha256=expected_sha,
-                    state="COMMITTED",
-                )
-                .first()
-            )
+            # 准备产物按项目、任务/PREPARE 作业、准备身份、逻辑路径与摘要共同绑定。
+            art = _prepared_artifact(session, task, prep, logical, expected_sha)
             if art is not None:
                 manifest.append(_entry(art, "prepared_case"))
             else:
@@ -391,8 +464,6 @@ def build_bundle(
                 )
     # 3) 方法与规则版本：按 TaskSpec.method 声明的包标识 + 摘要**精确解析**后冻结
     #    （问题 2：不再写死 buffer_chamber/0.1.0；版本变化必须留下可审查差异）。
-    resolved = resolve_method_package(session, rev.spec.get("method"))
-    metric_defs = load_metric_definitions(resolved.capability_package_id, resolved.version)
     method_package = {
         "capability_package_id": resolved.capability_package_id,
         "version": resolved.version,
@@ -402,17 +473,10 @@ def build_bundle(
         "digest_match": resolved.digest_match,
         "released": resolved.released,
     }
-    pkg_root = resolved.source_dir
-    for name, role in (
-        ("metric-definitions.json", "method_metrics"),
-        ("rules.json", "rules"),
-        ("domain.json", "method_domain"),
-        ("manifest.json", "method_manifest"),
-    ):
-        p = pkg_root / name
-        if p.is_file():
-            # 能力包文件原样冻结并标注 UNKNOWN 以外的实际来源模式（包本体不是 MOCK 证据）
-            stage(f"{base}/capability/{name}", p.read_bytes(), role, None)
+    for name, role in method_roles.items():
+        if name in method_files:
+            # 方法元数据不是求解证据；冻结 manifest 中索引的全部源文件以支持离线核验。
+            stage(f"{base}/capability/{name}", method_files[name], role, None)
     # 4) 全部逻辑 Run 及选用 attempt：原始 CSV/.sim/指标/Verification
     runs = (
         session.query(RunRow)
@@ -426,11 +490,9 @@ def build_bundle(
             .filter_by(run_id=run.run_id, state="COMMITTED")
             .all()
         ):
-            role = (
-                "raw"
-                if any(k in art.logical_path for k in ("report", "monitor", ".sim"))
-                else "metrics"
-            )
+            # Logs, case archives, process/exit proofs and conversion evidence
+            # are raw provenance. Only the normalized metric artifact is metrics.
+            role = "metrics" if Path(art.logical_path).name in _NORMALIZED_NAMES["metrics"] else "raw"
             manifest.append(_entry(art, role))
         for ver in session.query(VerificationRow).filter_by(run_id=run.run_id).all():
             stage(
@@ -634,7 +696,6 @@ def compute_completeness_manifest(
     for a in artifacts:
         if a.run_id:
             artifacts_by_run.setdefault(a.run_id, []).append(a)
-    ver_by_run = {v.get("run_id"): v for v in verifications if v.get("run_id")}
     for variant in spec["variants"]:
         for condition in spec["conditions"]:
             cell = f"{variant['variant_id']}×{condition['condition_id']}"
@@ -651,10 +712,16 @@ def compute_completeness_manifest(
                         "execution_state": run.execution_state,
                     }
                 )
-            arts = artifacts_by_run.get(run.run_id, [])
-            if not any("report" in a.logical_path for a in arts):
+            if not run.current_attempt_id:
+                missing.append({"kind": "MISSING_SELECTED_ATTEMPT", "cell": cell, "run_id": run.run_id})
+                continue
+            arts = [a for a in artifacts_by_run.get(run.run_id, []) if a.attempt_id == run.current_attempt_id]
+            if _single_normalized_artifact(arts, "report") is None:
                 missing.append({"kind": "MISSING_RAW_REPORT", "cell": cell, "run_id": run.run_id})
-            if run.run_id not in ver_by_run:
+            if not any(
+                v.get("run_id") == run.run_id and v.get("attempt_id") == run.current_attempt_id
+                for v in verifications
+            ):
                 missing.append({"kind": "MISSING_VERIFICATION", "cell": cell, "run_id": run.run_id})
 
     # 准备产物归属+摘要绑定（问题 2 验收条件 2）：冻结的 preparation 声明的每个

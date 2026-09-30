@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -181,17 +182,8 @@ def resolve_method_package(
         )
 
     matched = next((r for r in records if r.get("manifest_sha256") == declared), None)
-    if matched is None and session is not None and declared:
-        row = (
-            session.query(CapabilityPackageRow)
-            .filter_by(capability_package_id=pkg_id, manifest_sha256=declared)
-            .first()
-        )
-        if row is not None:
-            matched = next(
-                (r for r in records if r["version"] == row.version), None
-            )
-    digest_match = matched is not None
+    # A stale registration must never authenticate changed bytes on disk.  The
+    # registry is an index; only the current manifest content can match a digest.
     rec = matched or sorted(records, key=lambda r: r["version"])[-1]
 
     version = rec["version"]
@@ -213,17 +205,63 @@ def resolve_method_package(
             details={"capability_package_id": pkg_id, "version": version},
         ) from exc
 
+    # New packages bind their rules, units and boundary definitions in the
+    # manifest.  Older draft skeletons without a file index remain readable; a
+    # declared index is mandatory evidence and any mismatch blocks resolution.
+    verify_package_contents(mpath.parent, manifest)
+    current_digest = sha256_hex(canonical_dumps(manifest))
+
     return ResolvedMethodPackage(
         capability_package_id=pkg_id,
         version=version,
         status=rec.get("status", "INVALID"),
         manifest=manifest,
-        manifest_sha256=rec.get("manifest_sha256") or "",
+        manifest_sha256=current_digest,
         declared_sha256=declared,
-        digest_match=digest_match,
+        digest_match=current_digest == declared,
         released=rec.get("status") == "RELEASED",
         source_dir=root / pkg_id / version,
     )
+
+
+def verify_package_contents(source_dir: Path, manifest: dict[str, Any]) -> None:
+    """Verify a package's optional content_sha256 index without following links.
+
+    These are source-file digests, not engineering tolerances or approvals.
+    A manifest cannot authenticate itself, so its own entry is forbidden.
+    """
+    from dsh_sim.domain.errors import ApiError, ErrorCode
+
+    declared_files = manifest.get("content_sha256")
+    if declared_files is None:
+        return
+    if not isinstance(declared_files, dict) or not declared_files:
+        raise ApiError(ErrorCode.BLOCKED, "能力包 content_sha256 必须为非空文件摘要表")
+    root = source_dir.resolve()
+    for logical_path, expected in declared_files.items():
+        relative = Path(logical_path)
+        invalid = (
+            not isinstance(expected, str)
+            or len(expected) != 64
+            or any(c not in "0123456789abcdef" for c in expected)
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or "\\" in logical_path
+            or logical_path == "manifest.json"
+        )
+        path = root / relative
+        indexed_parts = [root.joinpath(*relative.parts[:i]) for i in range(1, len(relative.parts) + 1)]
+        if invalid or any(p.is_symlink() for p in indexed_parts):
+            raise ApiError(ErrorCode.BLOCKED, "能力包文件索引含非法路径或摘要", details={"path": logical_path})
+        if not path.resolve().is_relative_to(root) or not path.is_file():
+            raise ApiError(ErrorCode.BLOCKED, "能力包索引文件缺失", details={"path": logical_path})
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected:
+            raise ApiError(
+                ErrorCode.BLOCKED,
+                "能力包文件内容与 manifest 冻结摘要不一致",
+                details={"path": logical_path, "expected_sha256": expected, "actual_sha256": actual},
+            )
 
 
 def _default_root() -> Path:

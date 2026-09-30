@@ -1,0 +1,25 @@
+{
+  "capability_package_id": "openfoam_channel",
+  "version": "0.1.0",
+  "status": "DRAFT",
+  "description": "Software validation fixture only. Execution success does not freeze any engineering criterion.",
+  "rules": [
+    {
+      "rule_id": "RULE-MASS-IMBALANCE",
+      "target_metric": "steady_mass_imbalance",
+      "check": "abs(sum_b m_b) / max(sum_in abs(m_b), m_floor) <= threshold",
+      "threshold": null,
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    },
+    {
+      "rule_id": "RULE-MONITOR-STABILITY",
+      "target_metric": "monitor_stability",
+      "window": null,
+      "min_samples": null,
+      "allowed_variation": null,
+      "severity": "BLOCKER",
+      "status": "DRAFT"
+    }
+  ]
+}

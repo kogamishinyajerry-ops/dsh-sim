@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -27,7 +28,7 @@ from dsh_sim.verify.extract import ExtractedMetrics
 ENV_CAPABILITIES_ROOT = "DSH_SIM_CAPABILITIES_ROOT"
 DEFAULT_CAPABILITIES_ROOT = Path(__file__).resolve().parents[3] / "capabilities"
 
-# rules.json 中会被视为"阈值"的字段（任一非 None 即视为已冻结可判定）
+# 声明的阈值必须全部冻结；仅填写其中一个字段不能使整条规则成为可判定规则。
 _THRESHOLD_KEYS = (
     "threshold",
     "window",
@@ -36,6 +37,7 @@ _THRESHOLD_KEYS = (
     "reference_floor",
     "approved_grid_policy",
 )
+_MASS_IMBALANCE_CHECK = "abs(sum_b m_b) / max(sum_in abs(m_b), m_floor) <= threshold"
 
 
 @dataclass
@@ -91,6 +93,16 @@ def _rule_thresholds(rule: dict[str, Any]) -> dict[str, Any]:
     return {k: rule[k] for k in _THRESHOLD_KEYS if k in rule}
 
 
+def _finite_number(value: Any) -> bool:
+    """只接受提取器提供的有限 JSON 数字，拒绝 bool 和可转换的字符串。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def verify_run(
     *,
     extracted: ExtractedMetrics,
@@ -100,14 +112,46 @@ def verify_run(
 ) -> VerificationResult:
     """对一个 Run 的提取结果做独立校核。
 
-    规则阈值全部 null/TBD（当前 buffer_chamber/0.1.0 骨架状态）时：
-    每条规则产生 UNCONFIRMED finding，结论不可能是 PASS（诚实，不编阈值）。
+    required_metrics 使用精确 metric_id，不猜测别名或边界指标族。
+    null/TBD、无实现的规则、缺值及提取口径问题都会阻止 PASS；已确认违反
+    受支持规则时仍返回 FAIL，并保留所有证据缺口。数值结论与适用性分别记录。
     """
     findings: list[dict[str, Any]] = list(extracted.findings)
     has_fail = False
-    has_gap = bool(extracted.missing_metrics)
+    # 提取器 findings 当前均为缺失/单位/符号/未批准口径等问题，不能只展示而忽略。
+    has_gap = bool(extracted.findings)
+    metric_values = dict(extracted.metric_values)
+    missing_metrics = list(dict.fromkeys(extracted.missing_metrics))
+    required = list(required_metrics or [])
 
-    for mid in extracted.missing_metrics:
+    for mid, value in metric_values.items():
+        if value is not None and not _finite_number(value):
+            findings.append(
+                {
+                    "kind": "INVALID_METRIC_VALUE",
+                    "metric_id": mid,
+                    "observed_value": repr(value),
+                    "message": f"指标 {mid} 不是有限数值，保留问题并按缺失处理",
+                }
+            )
+            # JSON/canonical 摘要不允许 NaN/Inf；不修改原始提取结果，也不填 0。
+            metric_values[mid] = None
+        if metric_values[mid] is None and mid not in missing_metrics:
+            missing_metrics.append(mid)
+
+    for mid in required:
+        if mid in missing_metrics or metric_values.get(mid) is None:
+            findings.append(
+                {
+                    "kind": "REQUIRED_METRIC_MISSING",
+                    "metric_id": mid,
+                    "message": f"任务要求指标 {mid}，但没有对应的有效提取值，无法判 PASS",
+                }
+            )
+            if mid not in missing_metrics:
+                missing_metrics.append(mid)
+
+    for mid in missing_metrics:
         findings.append(
             {
                 "kind": "MISSING_METRIC",
@@ -115,38 +159,82 @@ def verify_run(
                 "message": f"指标 {mid} 缺失（null + MISSING；不填 0 不估算）",
             }
         )
+    has_gap = has_gap or bool(missing_metrics)
 
-    for rule in rules.get("rules", []):
+    rule_entries = rules.get("rules")
+    if not isinstance(rule_entries, list) or not rule_entries:
+        findings.append(
+            {"kind": "RULE_SET_INVALID", "message": "规则集缺失、为空或格式不符，无法判 PASS"}
+        )
+        has_gap = True
+        rule_entries = []
+
+    seen_rule_ids: set[str] = set()
+    for rule in rule_entries:
+        if not isinstance(rule, dict):
+            findings.append(
+                {"kind": "RULE_INVALID", "message": "规则条目不是对象，无法判定"}
+            )
+            has_gap = True
+            continue
         rid = rule.get("rule_id", "?")
         target = rule.get("target_metric")
+        if not isinstance(rid, str) or not rid or rid in seen_rule_ids:
+            findings.append(
+                {"kind": "RULE_INVALID", "message": "规则 ID 缺失、格式错误或重复，无法判定"}
+            )
+            has_gap = True
+            continue
+        seen_rule_ids.add(rid)
         thresholds = _rule_thresholds(rule)
-        frozen = {k: v for k, v in thresholds.items() if v is not None and v != "TBD"}
-        if thresholds and not frozen:
+        if not thresholds or any(v is None or v == "TBD" for v in thresholds.values()):
             findings.append(
                 {
                     "kind": "RULE_UNCONFIRMED",
                     "rule_id": rid,
                     "severity": rule.get("severity"),
-                    "message": f"规则 {rid} 阈值 null/TBD：Owner 未冻结（TBD-06），本项 UNCONFIRMED，不判定",
+                    "message": f"规则 {rid} 判据缺失或含 null/TBD：Owner 未冻结（TBD-06），本项 UNCONFIRMED，不判定",
                 }
             )
             has_gap = True
             continue
-        if not thresholds:
-            # 无阈值字段的规则（如适用域门）由 assess_applicability 另行处理
+
+        # 已实现的比较器必须匹配规则身份、输入和判据形状。未知规则及变更后的
+        # 自由文本不能因为带有 threshold 就被静默视为通过，也不执行文本表达式。
+        if not (
+            rid == "RULE-MASS-IMBALANCE"
+            and target == "steady_mass_imbalance"
+            and set(thresholds) == {"threshold"}
+            and rule.get("check", _MASS_IMBALANCE_CHECK) == _MASS_IMBALANCE_CHECK
+            and "operator" not in rule
+            and "comparator" not in rule
+        ):
             findings.append(
                 {
-                    "kind": "RULE_UNCONFIRMED",
+                    "kind": "RULE_UNSUPPORTED",
                     "rule_id": rid,
                     "severity": rule.get("severity"),
-                    "message": f"规则 {rid} 无已冻结判据（Owner 未冻结），本项 UNCONFIRMED",
+                    "message": f"规则 {rid} 的比较器尚未实现或判据不匹配，无法判定",
                 }
             )
             has_gap = True
             continue
-        # 已冻结阈值的确定性判定（当前骨架无此分支；阈值冻结后在此扩展逐规则复算）
-        value = extracted.metric_values.get(target) if target else None
-        if target and value is None:
+
+        threshold = thresholds["threshold"]
+        if not _finite_number(threshold) or threshold < 0:
+            findings.append(
+                {
+                    "kind": "RULE_INVALID_THRESHOLD",
+                    "rule_id": rid,
+                    "observed_value": repr(threshold),
+                    "message": f"规则 {rid} 需要有限且非负的质量不平衡阈值，无法判定",
+                }
+            )
+            has_gap = True
+            continue
+
+        value = metric_values.get(target)
+        if value is None or target in missing_metrics:
             findings.append(
                 {
                     "kind": "RULE_INPUT_MISSING",
@@ -155,16 +243,24 @@ def verify_run(
                 }
             )
             has_gap = True
-        elif target == "steady_mass_imbalance" and "threshold" in frozen:
-            if value > float(frozen["threshold"]):
-                findings.append(
-                    {
-                        "kind": "RULE_VIOLATED",
-                        "rule_id": rid,
-                        "message": f"质量不平衡 {value} 超过阈值 {frozen['threshold']}",
-                    }
-                )
-                has_fail = True
+        elif value < 0:
+            findings.append(
+                {
+                    "kind": "RULE_INPUT_INVALID",
+                    "rule_id": rid,
+                    "message": f"规则 {rid} 的质量不平衡输入为负数，无法判定",
+                }
+            )
+            has_gap = True
+        elif value > threshold:
+            findings.append(
+                {
+                    "kind": "RULE_VIOLATED",
+                    "rule_id": rid,
+                    "message": f"质量不平衡 {value} 超过阈值 {threshold}",
+                }
+            )
+            has_fail = True
 
     applicability = assess_applicability(domain)
     if applicability != ApplicabilityState.IN_SCOPE.value:
@@ -186,9 +282,9 @@ def verify_run(
         conclusion=conclusion,
         findings=findings,
         check_inputs={
-            "metric_values": extracted.metric_values,
-            "missing_metrics": extracted.missing_metrics,
-            "required_metrics": required_metrics or [],
+            "metric_values": metric_values,
+            "missing_metrics": missing_metrics,
+            "required_metrics": required,
             "rule_status": rules.get("status"),
         },
         applicability=applicability,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dsh-sim"
 version = "0.1.0"
-description = "DSH 工业仿真智能体首版（R0）：STAR-CCM+ 缓冲腔任务族 工程服务 + MCP 工具 + 工作台"
+description = "DSH 仿真核心：受控执行、独立校核、证据冻结与 MCP；含公开 OpenFOAM 集成验证"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -29,7 +29,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 markers = [
     "mock: Mock 层测试（默认全绿线，不需真实软件/网络）",
-    "real_solver: 需要真实 STAR-CCM+ 的测试（未执行记 NOT_RUN）",
+    "real_solver: 需要对应真实求解器的测试（OpenFOAM/STAR；未执行记 NOT_RUN）",
     "integration: 服务级集成测试（SQLite 开发库）",
 ]
 addopts = "-m 'not real_solver'"
