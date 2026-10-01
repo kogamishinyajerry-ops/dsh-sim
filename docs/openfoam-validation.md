@@ -125,6 +125,36 @@ PID 身份包括 boot ID、host/namespace PID、创建 ticks 和进程组；只�
 `poll()`，WAL 支持安全重传；**Worker 重启后自动接管仍运行作业尚未实现**。机器失联或强制杀死 Worker
 也不能声称已自动清理，现场核实仍是恢复前提。
 
+## 常驻 worker 入口
+
+`run_until_idle()` 在队列为空时退出，不适合与异步受理的工程 API 搭配。常驻部署使用
+最小受控服务入口（复用同一领取/处理实现，不另建队列语义）：
+
+```bash
+export DSH_SIM_DATABASE_URL='sqlite:////opt/data/dsh_sim.db'
+export DSH_SIM_ARTIFACT_ROOT=/opt/data/artifacts
+export DSH_SIM_WORKER_ADAPTER=openfoam            # 必须显式选择，不回退 MOCK
+export DSH_SIM_OPENFOAM_TEMPLATE_REGISTRY=openfoam_channel
+export DSH_SIM_OPENFOAM_TEMPLATE_ROOT=/opt/dsh-sim/capabilities
+export DSH_SIM_WORKER_WORK_DIR=/opt/data/worker
+python -m dsh_sim.worker.service
+```
+
+空队列时释放数据库写事务并按 `DSH_SIM_WORKER_IDLE_POLL_SECONDS`（默认 2s，上限为
+心跳间隔）等待后继续领取；SIGTERM/SIGINT 在当前作业完成后停止领取并正常退出。
+这是"持续运行的领取循环"，**不是**崩溃后自动接管：worker 被强制杀死后在运行作业
+转 LOST 待人工核实，重启后不会自动续跑未完成求解。
+
+## 受限实验发现（DRAFT 可见，批准语义不变）
+
+`GET /capabilities` 增加显式 `status` 参数：`RELEASED`（默认，正式目录）、`DRAFT`
+（validation-only / 未批准包）或 `ANY`。MCP `list_capabilities` 透传同一参数并在
+桥层拒绝其他取值。这使 planner 能在既有权限边界内发现 `openfoam_channel/0.1.0`
+这样的 DRAFT 方法包用于受限本地实验；正式默认目录与批准语义不变：DRAFT 不是工程
+批准，工程阈值保持 TBD，数值/适用性结论仍由独立校核给出（INSUFFICIENT /
+UNCONFIRMED 是诚实结果）。该参数为向后兼容新增（缺省行为不变）；能力包"无人工
+审批不得 RELEASED"的降级规则不受影响。
+
 ## 原生 DSH 接入
 
 Assets 仓的 `simulation` 声明式 preset 使用 `sim_orchestrate` 委派

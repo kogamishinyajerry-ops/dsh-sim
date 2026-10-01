@@ -13,7 +13,7 @@ import {
   blockerList, evidenceChain, offlineBanner, errorBlock, fmtTime,
 } from '../shared/components.js';
 
-const IDENTITY = { subject: 'dev-reviewer', roles: 'REVIEWER' }; // 开发模式，生产走受信会话
+const IDENTITY = { subject: 'dev-reviewer', roles: 'REVIEWER', projects: 'proj_a' }; // 开发模式，生产走受信会话；项目与 MCP/worker 同一专用测试项目
 
 const state = {
   reviewId: new URLSearchParams(location.search).get('review') || null,
