@@ -30,8 +30,8 @@ python make-template-registry.py --root /opt/data/openfoam-templates \
 
 | 仓 | 分支 | 提交 | 内容 |
 | --- | --- | --- | --- |
-| dsh-sim | `codex/p0-local-acceptance-fixes` | `7260236`（基于 `42029ff`） | worker 停止语义、授权读取投影与面板交接恢复、proj_a 默认可覆盖、本目录 |
-| JerryDSH-Assets | `codex/p0-local-acceptance-fixes` | `469d7e6` 之后新增 overlay 提交 | 脱敏 headless overlay / 600s 配置与说明 |
+| dsh-sim | `codex/p0-local-acceptance-fixes` | `7260236`、`12d1dd8`（基于 `42029ff`） | worker 停止语义、授权读取投影与面板交接恢复、proj_a 默认可覆盖、本目录 |
+| JerryDSH-Assets | `codex/p0-local-acceptance-fixes` | `637a894`（基于 `469d7e6`） | 脱敏 headless overlay（标准+600s）与说明 |
 
 ## 旧云端记录 vs 新本地记录
 
