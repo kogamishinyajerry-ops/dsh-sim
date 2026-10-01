@@ -9,18 +9,24 @@ JerryDSH-Assets `overlays/`（同一返修轮，两仓配套提交，SHA 见下�
 
 | 文件 | 用途 |
 | --- | --- |
-| `launch-worker.sh` | 常驻 worker 启动脚本（容器内实际部署版；关键：先 source 发行版 OpenFOAM bashrc；TEMPLATE_REGISTRY 为 JSON 文件路径） |
-| `make-template-registry.py` | 模板注册表 JSON 生成方法（确定性模板 + sha256/boundary_map 输出，供 TaskSpec 登记） |
-| `run-local.sh` | 启动/停止/状态/日志（`start`/`stop`/`status`/`logs`） |
+| `run-local.sh` | 启动/停止/状态/日志（宿主执行，驱动容器）。启动成功=进程存活+服务健康双重确认，失败非零；停止三态（已请求→正在退出→已退出），确认退出才报 stopped，超时报 NOT stopped 非零 |
+| `test-run-local.sh` | run-local 回归（8 项）：Docker 返回码 42 负例、启动失败非零、延迟退出 worker 三态停止、TERM 无视进程 NOT stopped、全新数据目录 registry→start→stop |
+| `launch-worker.sh` | 常驻 worker 启动脚本（由 run-local.sh `docker cp` **显式安装**进容器；路径全部从 DSH_SIM_DATA_DIR 派生；先 source 发行版 OpenFOAM bashrc——Ubuntu 包在 /usr/share/openfoam/etc/bashrc；禁用 set -u，该 bashrc 在 set -u 下 source 失败） |
+| `make-template-registry.py` | 模板注册表 JSON 生成（ref 白名单校验+路径穿越防护+解析目标必须位于 root 内+原子写 registry；校验先于任何写入） |
 
 ## 快速开始（容器已建好后）
 
 ```bash
-python make-template-registry.py --root /opt/data/openfoam-templates \
-  --ref public-openfoam-acc-01 --mean-velocity 0.012 --length 1.2 --height 0.08 \
-  --width 0.012 --nu 0.0012 --density 1050 --nx 72 --ny 16 --iterations 600
-./run-local.sh start
+# 宿主执行 run-local.sh；命令在容器内安装/启动
+./run-local.sh start          # 安装 launch-worker.sh + 启动 API/worker + 健康确认
 ./run-local.sh status
+./test-run-local.sh           # 8 项回归（含 42 负例、延迟退出、全新数据目录）
+
+# 容器内生成模板注册表（等价宿主 docker exec ...）
+docker exec jerrydsh-sim-env bash -c 'cd /opt/dsh-sim && /opt/venv/bin/python \
+  deployment/local-acceptance/make-template-registry.py --root /opt/data/openfoam-templates \
+  --ref public-openfoam-acc-01 --mean-velocity 0.012 --length 1.2 --height 0.08 \
+  --width 0.012 --nu 0.0012 --density 1050 --nx 72 --ny 16 --iterations 600'
 ```
 
 执行台：`http://127.0.0.1:8600/panels/executor/index.html`（dev 身份默认项目

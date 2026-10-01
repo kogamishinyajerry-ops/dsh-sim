@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 from pathlib import Path
 
 from dsh_sim.adapters.openfoam_adapter import (
@@ -25,6 +27,18 @@ from dsh_sim.adapters.openfoam_adapter import (
     read_template_metadata,
     template_sha256,
 )
+
+# 引用名安全白名单：字母/数字开头，仅字母数字._-，禁正斜杠与 ..
+# （防止 ref 构造出路径穿越，如 ../../etc/x 或绝对路径片段）
+REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def validate_ref(ref: str) -> None:
+    if not REF_RE.fullmatch(ref):
+        raise ValueError(
+            f"invalid ref {ref!r}: must match {REF_RE.pattern} (no '/', no '..')")
+    if ".." in ref:
+        raise ValueError(f"invalid ref {ref!r}: '..' is not allowed")
 
 
 def main() -> None:
@@ -43,22 +57,33 @@ def main() -> None:
     ap.add_argument("--iterations", type=int, required=True)
     args = ap.parse_args()
 
+    # ---- 写入前全部校验：失败不产生任何文件、不污染 registry ----
+    validate_ref(args.ref)
     root = Path(args.root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    dest = (root / f"channel-{args.ref}.tar").resolve()
+    if not dest.is_relative_to(root):
+        raise ValueError(f"resolved destination {dest} escapes root {root}")
     registry_path = root / "registry.json"
     registry = {}
     if registry_path.exists():
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        try:
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ValueError(f"existing registry.json is not valid JSON: {exc}") from exc
 
     params = {
         "mean_velocity": args.mean_velocity, "length": args.length, "height": args.height,
         "width": args.width, "nu": args.nu, "density": args.density,
         "nx": args.nx, "ny": args.ny, "iterations": args.iterations,
     }
-    dest = root / f"channel-{args.ref}.tar"
+
+    # ---- 校验全部通过后才写模板；最后原子写 registry（tmp + replace）----
     path = make_channel_template(dest, **params)
     registry[args.ref] = str(path)
-    registry_path.write_text(json.dumps(registry, indent=1, ensure_ascii=False), encoding="utf-8")
+    tmp = registry_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(registry, indent=1, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, registry_path)
 
     print(json.dumps({
         "ref": args.ref, "path": str(path), "sha256": template_sha256(path),
