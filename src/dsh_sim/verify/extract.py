@@ -57,6 +57,16 @@ def _to_float(raw: str) -> float | None:
     return v
 
 
+def _finite_number(value: Any) -> bool:
+    """能力包参数必须是有限 JSON 数字；不把 bool/字符串当作批准参数。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def parse_report_csv(path: str | Path) -> tuple[list[BoundarySample], list[dict[str, Any]]]:
     """解析固定列报告 CSV（# 开头为注释）。坏行不丢弃：记 finding，字段缺失为 None。"""
     samples: list[BoundarySample] = []
@@ -90,6 +100,7 @@ def parse_report_csv(path: str | Path) -> tuple[list[BoundarySample], list[dict[
         for name, val in (
             ("mass_flow_kg_s", sample.mass_flow_kg_s),
             ("total_pressure_pa", sample.total_pressure_pa),
+            ("static_pressure_pa", sample.static_pressure_pa),
         ):
             if val is None:
                 findings.append(
@@ -135,14 +146,17 @@ def extract_run_metrics(
         inlets = [s for s in samples if s.section == "inlet"]
         outlets = [s for s in samples if s.section == "outlet"]
 
-        # 边界质量流量/总压（原始量，含符号约定记录）
+        # 边界质量流量/总压/静压（直接来自 CSV，含符号约定记录，不互相推算）
         for s in samples:
             out.metric_values[f"boundary_mass_flow@{s.boundary_role}"] = s.mass_flow_kg_s
             out.metric_values[f"total_pressure@{s.boundary_role}"] = s.total_pressure_pa
+            out.metric_values[f"static_pressure@{s.boundary_role}"] = s.static_pressure_pa
             if s.mass_flow_kg_s is None:
                 out.missing_metrics.append(f"boundary_mass_flow@{s.boundary_role}")
             if s.total_pressure_pa is None:
                 out.missing_metrics.append(f"total_pressure@{s.boundary_role}")
+            if s.static_pressure_pa is None:
+                out.missing_metrics.append(f"static_pressure@{s.boundary_role}")
             if s.sign_convention != "outward_positive":
                 out.findings.append(
                     {
@@ -158,7 +172,7 @@ def extract_run_metrics(
         if any(f is None for f in flows) or not flows:
             out.metric_values["steady_mass_imbalance"] = None
             out.missing_metrics.append("steady_mass_imbalance")
-        elif m_floor is None:
+        elif m_floor is None or m_floor == "TBD":
             # m_floor 是 Owner 冻结保护尺度；未冻结不得自编分母（TBD-06）
             out.metric_values["steady_mass_imbalance"] = None
             out.missing_metrics.append("steady_mass_imbalance")
@@ -169,11 +183,24 @@ def extract_run_metrics(
                     "message": "m_floor 未冻结（Owner/TBD-06），稳态质量不平衡无法按批准口径计算",
                 }
             )
+        elif not _finite_number(m_floor) or m_floor < 0:
+            out.metric_values["steady_mass_imbalance"] = None
+            out.missing_metrics.append("steady_mass_imbalance")
+            out.findings.append(
+                {
+                    "kind": "INVALID_METRIC_DEFINITION",
+                    "metric_id": "steady_mass_imbalance",
+                    "parameter": "m_floor",
+                    "observed_value": repr(m_floor),
+                    "message": "m_floor 不是有限非负数字，质量不平衡按缺失处理，不用无效分母压低结果",
+                }
+            )
         else:
             sum_in = sum(abs(f) for f in flows if f < 0)  # type: ignore[operator]
             denom = max(sum_in, float(m_floor))
             if denom <= 0:
                 out.metric_values["steady_mass_imbalance"] = None
+                out.missing_metrics.append("steady_mass_imbalance")
                 out.findings.append(
                     {
                         "kind": "NOT_APPLICABLE",
@@ -228,7 +255,9 @@ def extract_run_metrics(
 
     # 监控稳定性：窗口/最小采样长度由规则包给定（null → 不取值）
     stab = defs.get("monitor_stability") or {}
-    if stab.get("window") is None or stab.get("min_samples") is None:
+    window = stab.get("window")
+    min_samples_value = stab.get("min_samples")
+    if any(value is None or value == "TBD" for value in (window, min_samples_value)):
         out.metric_values["monitor_stability"] = None
         out.missing_metrics.append("monitor_stability")
         out.findings.append(
@@ -236,6 +265,21 @@ def extract_run_metrics(
                 "kind": "UNFROZEN_THRESHOLD",
                 "metric_id": "monitor_stability",
                 "message": "监控窗口/最小采样长度未冻结（Owner/TBD-06），监控稳定性无法按批准口径判定",
+            }
+        )
+    elif not all(
+        _finite_number(value) and value > 0 and int(value) == value
+        for value in (window, min_samples_value)
+    ):
+        out.metric_values["monitor_stability"] = None
+        out.missing_metrics.append("monitor_stability")
+        out.findings.append(
+            {
+                "kind": "INVALID_METRIC_DEFINITION",
+                "metric_id": "monitor_stability",
+                "observed_window": repr(window),
+                "observed_min_samples": repr(min_samples_value),
+                "message": "监控窗口/最小采样长度需要有限正整数，参数无效，监控稳定性按缺失处理",
             }
         )
     elif monitor_csv is None:
@@ -257,7 +301,7 @@ def extract_run_metrics(
                 v = _to_float(parts[1])
                 if v is not None:
                     series.append(v)
-        min_samples = int(stab["min_samples"])
+        min_samples = int(min_samples_value)
         if len(series) < min_samples:
             out.metric_values["monitor_stability"] = None
             out.missing_metrics.append("monitor_stability")

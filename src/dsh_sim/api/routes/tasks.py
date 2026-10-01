@@ -134,6 +134,47 @@ def authorizeRuns(
     return respond(idem, resource_id=auth.authorization_id, status_code=201, body=auth)
 
 
+@router.get("/tasks/{task_id}/authorizations", operation_id="listTaskAuthorizations")
+def listTaskAuthorizations(
+    task_id: str,
+    session: Session = Depends(get_session),
+    identity: Identity = Depends(get_identity),
+) -> JSONResponse:
+    """任务授权读取投影（只读；项目权限由 get_task_row 校验，跨项目 403）。
+
+    用途：执行台"仅授权"后的**交接恢复**——页面刷新或弹窗关闭后，仍能读回当前
+    修订有效的 authorization_id + prepared_digest，交给 AGENT runner 首次提交，
+    避免重复授权。人工 confirmation 一次性凭据不在本投影（只留在人工流程）；
+    本端点也不是 12 个 MCP 工具之一，模型侧仍无授权/批准能力。
+    """
+    from dsh_sim.api.services.task_service import get_task_row
+    from dsh_sim.db.models import AuthorizationRow
+
+    get_task_row(session, identity, task_id)  # 项目权限检查
+    rows = (
+        session.query(AuthorizationRow)
+        .filter_by(task_id=task_id)
+        .order_by(AuthorizationRow.created_at.desc())
+        .all()
+    )
+    items = [
+        {
+            "authorization_id": r.authorization_id,
+            "revision": r.revision,
+            "preparation_id": r.preparation_id,
+            "prepared_digest": r.prepared_digest,
+            "execution_budget": r.execution_budget,
+            "authorized_by": r.authorized_by,
+            "purpose": r.purpose,
+            "validity": r.validity,
+            "created_at": r.created_at.isoformat(),
+            "revoked_at": r.revoked_at.isoformat() if r.revoked_at else None,
+        }
+        for r in rows
+    ]
+    return JSONResponse({"items": items})
+
+
 class SubmitRunsBody(BaseModel):
     authorization_id: str
     prepared_digest: str

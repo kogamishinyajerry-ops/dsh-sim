@@ -52,13 +52,14 @@ EVENT_KINDS = frozenset(
 
 _CLAIMABLE = (ExecutionState.QUEUED.value, ExecutionState.WAITING_RESOURCE.value)
 
-# 节点/任务配额的占用口径：已出租且未终态、未 LOST 的作业（QUEUED 不占用资源）
+# LOST 尚不能证明进程退出，继续占用节点/任务预算，禁止并行重派造成双跑。
 _LEASED_ACTIVE = (
     ExecutionState.LEASED.value,
     ExecutionState.STARTING.value,
     ExecutionState.RUNNING.value,
     ExecutionState.CANCELLING.value,
     ExecutionState.COLLECTING.value,
+    ExecutionState.LOST.value,
 )
 
 
@@ -261,6 +262,8 @@ def post_event(
     job = session.get(JobRow, job_id)
     if job is None:
         raise ApiError(ErrorCode.VALIDATION, "job 不存在", details={"job_id": job_id})
+    # 长运行 Worker 持有 identity map；先回读刚提交的取消/LOST，不能用旧状态覆盖它。
+    session.refresh(job)
 
     lease = _current_lease(session, job_id)
     if (
@@ -312,14 +315,19 @@ def post_event(
     session.add(event)
 
     if kind == "HEARTBEAT":
-        lease.last_heartbeat_at = now
+        if job.state not in EXECUTION_TERMINAL and job.state != ExecutionState.LOST.value:
+            lease.last_heartbeat_at = now
+            lease.expires_at = now + timedelta(seconds=LEASE_SECONDS)
         session.flush()
         return event
 
     target = _target_state_for_event(kind)
+    # 保持冻结的六种事件 kind；失败事件内明确退出未证实，投影为既有 LOST 状态。
+    if kind == "FAILED" and payload.get("exit_unconfirmed") is True:
+        target = ExecutionState.LOST
 
     # 晚到完成不得覆盖已撤销/已终态：事件已入审计日志，状态不再迁移。
-    if job.state in EXECUTION_TERMINAL:
+    if job.state in EXECUTION_TERMINAL or job.state == ExecutionState.LOST.value:
         session.flush()
         return event
 
@@ -358,12 +366,13 @@ def _apply_execution_state(
         if attempt is not None and attempt.state not in EXECUTION_TERMINAL:
             if can_transition(ExecutionState(attempt.state), target):
                 attempt.state = target.value
+                if "process_identity" in payload:
+                    value = payload["process_identity"]
+                    attempt.process_identity = value if isinstance(value, dict) else {"identity": value}
                 if target == ExecutionState.STARTING:
                     attempt.started_at = now
                 if target in EXECUTION_TERMINAL:
                     attempt.ended_at = now
-                    if "process_identity" in payload:
-                        attempt.process_identity = payload["process_identity"]
 
     if job.run_id:
         run = session.get(RunRow, job.run_id)
@@ -398,6 +407,11 @@ def heartbeat(
             details={"job_id": job_id},
         )
     lease.last_heartbeat_at = now
+    job = session.get(JobRow, job_id)
+    if job is not None:
+        session.refresh(job)
+    if job is not None and job.state not in EXECUTION_TERMINAL and job.state != ExecutionState.LOST.value:
+        lease.expires_at = now + timedelta(seconds=LEASE_SECONDS)
     session.flush()
 
 
@@ -473,6 +487,10 @@ def request_cancel(session: Session, *, job_id: str, now: datetime | None = None
     elif can_transition(current, ExecutionState.CANCELLING):
         job.state = ExecutionState.CANCELLING.value
         job.row_version += 1
+        if job.attempt_id:
+            attempt = session.get(AttemptRow, job.attempt_id)
+            if attempt is not None and can_transition(ExecutionState(attempt.state), ExecutionState.CANCELLING):
+                attempt.state = ExecutionState.CANCELLING.value
         if job.run_id:
             run = session.get(RunRow, job.run_id)
             if run is not None and can_transition(

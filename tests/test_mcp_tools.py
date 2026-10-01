@@ -367,3 +367,34 @@ def test_unavailable_when_service_down(api, monkeypatch):
     assert body["message"] == "工程服务不可用"
     assert body["retryable"] is True
     assert body["details"]["source"] == "mcp-bridge"
+
+
+# ---------------------------------------------------------------------------
+# 断点 D 回归：受限本地实验发现（DRAFT / ANY 可见，批准语义不变）
+# ---------------------------------------------------------------------------
+
+
+def test_list_capabilities_draft_discovery(api):
+    """默认目录仍只含 RELEASED；status=DRAFT/ANY 显式可见 validation-only 包。
+
+    openfoam_channel/0.1.0 在磁盘为 DRAFT（启动扫描注册，永不自动 RELEASED）。
+    planner 必须能显式发现它用于受限本地实验，而正式默认目录保持受控。
+    """
+    released = call("list_capabilities")
+    assert "items" in released, released
+    assert not any(i["capability_package_id"] == "openfoam_channel" for i in released["items"])
+
+    draft = call("list_capabilities", status="DRAFT")
+    assert "items" in draft, draft
+    row = next(i for i in draft["items"] if i["capability_package_id"] == "openfoam_channel")
+    assert row["status"] == "DRAFT", row
+
+    any_view = call("list_capabilities", status="ANY")
+    ids = {i["capability_package_id"] for i in any_view["items"]}
+    assert "openfoam_channel" in ids and "buffer_chamber" in ids, any_view
+
+
+def test_list_capabilities_rejects_unknown_status(api):
+    body = call("list_capabilities", status="bogus")
+    assert body["code"] == "VALIDATION", body
+    assert body["details"]["source"] == "mcp-bridge", body

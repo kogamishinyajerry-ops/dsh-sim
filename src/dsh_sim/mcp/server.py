@@ -174,13 +174,29 @@ def _with_hint(body: dict[str, Any], hint: str) -> dict[str, Any]:
 
 
 @mcp.tool
-async def list_capabilities(cursor: str | None = None, limit: int = 50) -> dict:
-    """查询当前域已发布（RELEASED）能力包目录（游标分页）。
+async def list_capabilities(
+    cursor: str | None = None,
+    limit: int = 50,
+    status: str = "RELEASED",
+) -> dict:
+    """查询能力包目录（游标分页）。
+
+    status 只接受 "RELEASED"（默认，正式目录）、"DRAFT"（受限本地实验发现：
+    validation-only / 未批准包，含 DRAFT 状态标记）或 "ANY"。默认目录与批准
+    语义不变：DRAFT 不构成工程批准，工程阈值保持 TBD，数值/适用性结论仍由
+    独立校核给出（INSUFFICIENT / UNCONFIRMED 是诚实结果）。
 
     只读操作。模型侧无授权/接受能力：本工具集不含 authorizeRuns/decideReview 等
     人工批准动作，Agent 身份调用服务端亦会被 403 拒绝。
     """
-    params: dict[str, Any] = {"limit": limit}
+    if status not in ("RELEASED", "DRAFT", "ANY"):
+        return _local_error(
+            "VALIDATION",
+            "status 只接受 RELEASED / DRAFT / ANY；默认 RELEASED 为正式目录",
+            retryable=False,
+            details={"status": status},
+        )
+    params: dict[str, Any] = {"limit": limit, "status": status}
     if cursor:
         params["cursor"] = cursor
     return await _request("GET", "/capabilities", params=params)
