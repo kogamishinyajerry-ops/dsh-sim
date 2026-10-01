@@ -42,7 +42,9 @@ export function devIdentityHeaders({ subject, roles, projects } = {}) {
   return {
     'X-Dev-Subject': subject ?? ls('dshsim.subject', 'dev-user'),
     'X-Dev-Roles': roles ?? ls('dshsim.roles', 'EXECUTOR'),
-    'X-Dev-Projects': projects ?? ls('dshsim.projects', 'default'),
+    // 默认 proj_a = 专用测试项目（与 MCP DSH_SIM_AGENT_PROJECTS 默认一致）；
+    // 显式配置（调用方传入 > localStorage dshsim.projects）优先于默认值。
+    'X-Dev-Projects': projects ?? ls('dshsim.projects', 'proj_a'),
   };
 }
 

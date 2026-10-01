@@ -22,9 +22,10 @@ import {
 
 // 开发模式，生产走受信会话。角色必须使用服务端合法枚举（EXECUTOR 等；
 // 旧值 ENGINEER 不是合法角色，authorizeRuns 会被 403 拒绝）。
-// projects 与 MCP（DSH_SIM_AGENT_PROJECTS，默认 proj_a）使用同一专用测试项目，
-// 保证面板创建的任务与 MCP/worker 看到的是同一个工程域。
-const IDENTITY = { subject: 'dev-executor', roles: 'EXECUTOR', projects: 'proj_a' };
+// 项目不在此硬编码：shared/api.js 的 devIdentityHeaders 默认 dshsim.projects=proj_a
+// （与 MCP DSH_SIM_AGENT_PROJECTS 默认一致，同一专用测试项目），需要时用
+// localStorage 覆盖，显式配置优先于默认值。
+const IDENTITY = { subject: 'dev-executor', roles: 'EXECUTOR' };
 const HEARTBEAT_LOST_AFTER_S = 45; // 心跳 15s × 3 次失联判定（定义书 §并发、断线、取消与补算规则）
 const ACTIVE_EXEC_STATES = new Set(['QUEUED', 'WAITING_RESOURCE', 'LEASED', 'STARTING', 'RUNNING', 'CANCELLING', 'COLLECTING']);
 
@@ -38,10 +39,20 @@ const state = {
   bundle: null,
   claims: [],
   metrics: null,
+  authorizations: [],
   offline: false,
   selectedRunId: null,
   pollTimer: null,
 };
+
+/** 当前修订仍有效的授权（交接恢复用）；null 表示没有可复用授权。 */
+function activeAuthorization() {
+  const t = state.task;
+  if (!t || t.__error) return null;
+  return (state.authorizations || []).find((a) =>
+    a.validity === 'CURRENT' && !a.revoked_at && a.revision === t.current_revision
+  ) || null;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -255,14 +266,29 @@ function renderConfirmPane() {
   // runner 提交，破坏人工授权/模型执行的职责分离。
   const unresolved = diffs.some((d) => diffStatus(d) === 'diff') || blockers.length > 0;
   const readyState = state.task && !state.task.__error && state.task.task_state === 'READY';
+  const activeAuth = activeAuthorization();
+
+  // 交接恢复块：授权后关闭弹窗或刷新，从这里读回 authorization_id + prepared_digest。
+  if (activeAuth) {
+    body.append(el('div', { class: 'prep-meta', id: 'active-authorization' }, [
+      el('h3', { text: '当前有效授权（交接恢复；勿重复授权）' }),
+      el('div', {}, [document.createTextNode('authorization_id：'), el('code', { text: activeAuth.authorization_id })]),
+      el('div', {}, [document.createTextNode('prepared_digest：'), digestShort(activeAuth.prepared_digest)]),
+      el('div', { class: 'muted-line', text: `修订 R${activeAuth.revision} · 授权人 ${activeAuth.authorized_by} · 有效性 ${activeAuth.validity}` }),
+      el('p', { class: 'muted-line', text: '首次提交必须由 AGENT runner 经工程 MCP 的 submit_runs 使用以上 authorization_id + prepared_digest 完成；本面板不再重复生成授权。' }),
+    ]));
+  }
+
   const btnRow = el('div', { class: 'btn-row' });
   const btnRun = el('button', {
     class: 'btn btn-primary', type: 'button',
     text: '确认并授权（不提交）',
     title: '绑定 prepared 摘要的人工授权；提交由 AGENT runner 经 MCP 完成',
   });
-  btnRun.disabled = !(readyState && !unresolved && !state.offline);
-  if (btnRun.disabled) {
+  btnRun.disabled = !(readyState && !unresolved && !state.offline) || !!activeAuth;
+  if (activeAuth) {
+    btnRun.title = '当前修订已有有效授权（见上方交接恢复块）；不重复授权';
+  } else if (btnRun.disabled) {
     btnRun.title = '差异未清 / 存在阻塞 / 任务未到 READY / 服务离线时禁用';
   }
   btnRun.addEventListener('click', onAuthorizeOnly);
@@ -277,7 +303,9 @@ function renderConfirmPane() {
   if (btnRun.disabled) {
     const reasons = [];
     if (state.offline) reasons.push('工程服务离线');
-    if (!readyState) reasons.push(`任务阶段为 ${state.task?.task_state || '未知'}，未到 READY`);
+    if (activeAuth) reasons.push('当前修订已有有效授权（见上方交接恢复块），不重复授权');
+    if (!readyState) reasons.push(`任务阶段为 ${state.task?.task_state || '未知'}`);
+    if (!activeAuth && !readyState && state.task?.task_state !== 'READY') reasons.push('任务未到 READY');
     if (diffs.some((d) => diffStatus(d) === 'diff')) reasons.push('存在未清申请/回读差异');
     if (blockers.length) reasons.push(`存在 ${blockers.length} 项阻塞（见上方清单，含责任人与可采取动作）`);
     body.append(el('ul', { class: 'disable-reasons' }, reasons.map((r) => el('li', { text: r }))));
@@ -331,6 +359,7 @@ async function onAuthorizeOnly() {
     el('p', { text: `授权已生效，任务进入 AUTHORIZED。authorization_id：${auth.data.authorization_id}` }),
     el('div', { class: 'confirm-digest' }, [document.createTextNode('prepared_digest：'), digestShort(p.prepared_digest)]),
     el('p', { text: '本面板没有入队任何作业。首次提交必须由 AGENT runner 经工程 MCP 的 submit_runs 工具，使用上述 authorization_id + prepared_digest 完成。' }),
+    el('p', { class: 'muted-line', text: '关闭本弹窗或刷新页面后，确认区域的"当前有效授权（交接恢复）"块会读回同一 authorization_id + prepared_digest，不会重复授权。' }),
     el('p', { class: 'muted-line', text: '提交后可在本面板运行区域查看真实进度；也可在此请求取消。' }),
   ]);
   await loadTask(t.task_id);
@@ -577,20 +606,23 @@ async function loadTask(taskId) {
   state.taskId = taskId;
   state.task = state.revision = state.preparation = state.bundle = null;
   state.runs = []; state.claims = []; state.metrics = null;
+  state.authorizations = [];
   state.offline = false;
   renderAll();
 
   state.task = await tryGet(`/tasks/${taskId}`, '任务');
   if (!state.task || state.task.__error) { renderAll(); return; }
 
-  const [rev, prep, bundle] = await Promise.all([
+  const [rev, prep, bundle, auths] = await Promise.all([
     tryGet(`/tasks/${taskId}/revisions/latest`, '修订'),
     tryGet(`/tasks/${taskId}/preparations/latest`, '准备'),
     tryGet(`/tasks/${taskId}/bundles/latest`, '证据包'),
+    tryGet(`/tasks/${taskId}/authorizations`, '授权（交接恢复）'),
   ]);
   state.revision = rev;
   state.preparation = prep;
   state.bundle = bundle;
+  if (auths && !auths.__error) state.authorizations = Array.isArray(auths.items) ? auths.items : [];
   await refreshRuns();
 
   if (bundle && !bundle.__error) {

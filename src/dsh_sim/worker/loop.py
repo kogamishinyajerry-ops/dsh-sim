@@ -28,7 +28,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -917,13 +917,22 @@ def run_until_idle(
     session: Session,
     adapter: StarAdapter,
     config: WorkerConfig,
+    *,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[str]:
-    """顺序领取并处理作业直到队列空。返回处理的 job_id 列表（测试可断言）。"""
+    """顺序领取并处理作业直到队列空。返回处理的 job_id 列表（测试可断言）。
+
+    should_stop 在**领取边界**检查（每次 claim 之前）：停止请求不影响正在执行的
+    作业（当前作业完整跑完并落证据），只保证队列中剩余作业保持未领取。
+    常驻服务（worker/service.py）用它实现"完成当前项后退出，后续项不动"。
+    """
     wal = JsonlWal(config.work_root / "worker.wal.jsonl")
     replay_wal(session, wal)
     processed: list[str] = []
     count = 0
     while True:
+        if should_stop is not None and should_stop():
+            break  # 领取边界停止：剩余作业保持未领取，由调用方决定后续
         if config.max_jobs is not None and count >= config.max_jobs:
             break
         job, lease = queue_service.claim(session, node_id=config.node_id)

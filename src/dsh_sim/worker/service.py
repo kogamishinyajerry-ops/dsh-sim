@@ -113,7 +113,8 @@ def serve(
     total = 0
     while not flag.requested:
         with factory() as session:
-            processed = run_until_idle(session, adapter, cfg)
+            # 领取边界检查停止：停止请求不打断当前作业，只保证剩余作业不被领取。
+            processed = run_until_idle(session, adapter, cfg, should_stop=lambda: flag.requested)
         if processed:
             total += len(processed)
             log(f"processed {len(processed)} job(s): {', '.join(processed)} (total={total})")
@@ -121,7 +122,7 @@ def serve(
         # 空队列：会话已随 with 块提交/关闭（释放写事务），再等待。
         log(f"queue idle; sleeping {idle_wait}s")
         _sleep_interruptible(idle_wait, flag)
-    log(f"worker stopped gracefully; total processed={total}")
+    log(f"worker stopped gracefully; total processed={total} (unclaimed jobs remain queued)")
 
 
 def _sleep_interruptible(seconds: float, stop: StopFlag) -> None:

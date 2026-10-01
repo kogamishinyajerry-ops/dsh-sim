@@ -13,7 +13,9 @@ import {
   blockerList, evidenceChain, offlineBanner, errorBlock, fmtTime,
 } from '../shared/components.js';
 
-const IDENTITY = { subject: 'dev-reviewer', roles: 'REVIEWER', projects: 'proj_a' }; // 开发模式，生产走受信会话；项目与 MCP/worker 同一专用测试项目
+// 项目不在此硬编码：shared/api.js 默认 dshsim.projects=proj_a（与 MCP/worker 同一
+// 专用测试项目），需要时用 localStorage 覆盖，显式配置优先于默认值。
+const IDENTITY = { subject: 'dev-reviewer', roles: 'REVIEWER' };
 
 const state = {
   reviewId: new URLSearchParams(location.search).get('review') || null,
