@@ -134,14 +134,24 @@ PID 身份包括 boot ID、host/namespace PID、创建 ticks 和进程组；只�
 export DSH_SIM_DATABASE_URL='sqlite:////opt/data/dsh_sim.db'
 export DSH_SIM_ARTIFACT_ROOT=/opt/data/artifacts
 export DSH_SIM_WORKER_ADAPTER=openfoam            # 必须显式选择，不回退 MOCK
-export DSH_SIM_OPENFOAM_TEMPLATE_REGISTRY=openfoam_channel
-export DSH_SIM_OPENFOAM_TEMPLATE_ROOT=/opt/dsh-sim/capabilities
+# 注意：该变量是【模板注册表 JSON 文件的路径】（{"引用名": "/abs/path/channel.tar"}），
+# 不是 capability ID。registry 里每个路径必须位于 DSH_SIM_OPENFOAM_TEMPLATE_ROOT 之内。
+# 生成方法见 deployment/local-acceptance/make-template-registry.py。
+export DSH_SIM_OPENFOAM_TEMPLATE_REGISTRY=/opt/data/openfoam-templates/registry.json
+export DSH_SIM_OPENFOAM_TEMPLATE_ROOT=/opt/data/openfoam-templates
 export DSH_SIM_WORKER_WORK_DIR=/opt/data/worker
 python -m dsh_sim.worker.service
 ```
 
+Ubuntu 发行版包的 OpenFOAM 环境必须先加载再启动 worker（`source
+/usr/share/openfoam/etc/bashrc`；OpenCFD 官方 tgz 布局则在
+`/usr/lib/openfoam/openfoam1912/etc/bashrc`），否则 probe 阶段即失败。
+可运行示例（启动/停止、launch-worker.sh、模板注册表生成）见
+[deployment/local-acceptance/](../deployment/local-acceptance/)。
+
 空队列时释放数据库写事务并按 `DSH_SIM_WORKER_IDLE_POLL_SECONDS`（默认 2s，上限为
-心跳间隔）等待后继续领取；SIGTERM/SIGINT 在当前作业完成后停止领取并正常退出。
+心跳间隔）等待后继续领取；SIGTERM/SIGINT 在**领取边界**生效：当前作业完整完成并
+落证据后优雅退出，队列中剩余作业保持未领取（之后仍可被新 worker 正常领取）。
 这是"持续运行的领取循环"，**不是**崩溃后自动接管：worker 被强制杀死后在运行作业
 转 LOST 待人工核实，重启后不会自动续跑未完成求解。
 
