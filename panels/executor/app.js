@@ -303,7 +303,7 @@ async function onAuthorizeOnly() {
     el('p', { text: `任务 ${t.task_id} · 修订 R${t.current_revision} · 用途 ${t.purpose}` }),
     el('p', { text: `准备 ${p.preparation_id}` }),
     el('div', { class: 'confirm-digest' }, [document.createTextNode('prepared_digest：'), digestShort(p.prepared_digest)]),
-    el('p', { text: `执行预算：${esc(JSON.stringify(budget))}` }),
+    el('p', { text: `执行预算：${JSON.stringify(budget)}` }),
     el('p', { class: 'warn-line', text: 'Agent 不能代替本确认；确认凭据一次性消费。首次提交由 AGENT runner 经工程 MCP submit_runs 使用本授权完成。' }),
   ], { confirmText: '确认并授权（不提交）', danger: false });
   if (!ok) return;
